@@ -1,0 +1,7 @@
+.git
+**/.git
+target/
+data/
+db_v2.sqlite3*
+.env
+Dockerfile.bak

@@ -1,21 +1,25 @@
-version: '3'
-
 networks:
   rustdesk-net:
-    external: false
+    driver: bridge
 
 services:
   hbbs:
     container_name: hbbs
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rustdesk-server-custom:1.1.17
+    environment:
+      - ALWAYS_USE_RELAY=Y
+      - RELAY=remote.bushido-tech.com:21117
     ports:
-      - 21115:21115
-      - 21116:21116
-      - 21116:21116/udp
-      - 21118:21118
-    image: rustdesk/rustdesk-server:latest
-    command: hbbs -r rustdesk.example.com:21117
+      - "21115:21115"
+      - "21116:21116"
+      - "21116:21116/udp"
+      - "21118:21118"
+      - "31120:31120"
     volumes:
-      - ./data:/root
+      - ./data:/data
     networks:
       - rustdesk-net
     depends_on:
@@ -24,13 +28,12 @@ services:
 
   hbbr:
     container_name: hbbr
+    image: rustdesk-server-custom:1.1.17
     ports:
-      - 21117:21117
-      - 21119:21119
-    image: rustdesk/rustdesk-server:latest
-    command: hbbr
+      - "21117:21117"
+      - "21119:21119"
     volumes:
-      - ./data:/root
+      - ./data:/data
     networks:
       - rustdesk-net
     restart: unless-stopped
