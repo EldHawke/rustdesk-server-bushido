@@ -8,7 +8,6 @@ WORKDIR /build
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
     cargo build --release --bins
 
 # ---------- Runtime ----------
