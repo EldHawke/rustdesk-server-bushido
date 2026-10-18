@@ -4,10 +4,12 @@
 use flexi_logger::*;
 use hbb_common::{bail, config::RENDEZVOUS_PORT, ResultType};
 use hbbs::{common::*, *};
+use hbbs::server;
 
 const RMEM: usize = 0;
 
-fn main() -> ResultType<()> {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> ResultType<()> {
     let _logger = Logger::try_with_env_or_str("info")?
         .log_to_stdout()
         .format(opt_format)
@@ -34,12 +36,12 @@ fn main() -> ResultType<()> {
     let rmem = get_arg("rmem").parse::<usize>().unwrap_or(RMEM);
     let serial: i32 = get_arg("serial").parse().unwrap_or(0);
     crate::common::check_software_update();
-    RendezvousServer::start_with_bind(
+    server::start(
         bind_addr,
         port,
         serial,
         &get_arg_or("key", "-".to_owned()),
         rmem,
-    )?;
+    ).await?;
     Ok(())
 }

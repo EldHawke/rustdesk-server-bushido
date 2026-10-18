@@ -11,11 +11,9 @@ use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, collections::HashSet, net::SocketAddr, sync::Arc, time::Instant};
 
 type IpBlockMap = HashMap<String, ((u32, Instant), (HashSet<String>, Instant))>;
-type UserStatusMap = HashMap<Vec<u8>, Arc<(Option<Vec<u8>>, bool)>>;
 type IpChangesMap = HashMap<String, (Instant, HashMap<String, i32>)>;
 lazy_static::lazy_static! {
-    pub(crate) static ref IP_BLOCKER: Mutex<IpBlockMap> = Default::default();
-    pub(crate) static ref USER_STATUS: RwLock<UserStatusMap> = Default::default();
+    pub(crate) static ref IP_BLOCKER: Mutex<IpBlockMap> = Default::default();    
     pub(crate) static ref IP_CHANGES: Mutex<IpChangesMap> = Default::default();
 }
 pub const IP_CHANGE_DUR: u64 = 180;
@@ -35,7 +33,7 @@ pub(crate) struct Peer {
     pub(crate) guid: Vec<u8>,
     pub(crate) uuid: Bytes,
     pub(crate) pk: Bytes,
-    // pub(crate) user: Option<Vec<u8>>,
+    pub(crate) status: Option<i64>,    
     pub(crate) info: PeerInfo,
     // pub(crate) disabled: bool,
     pub(crate) reg_pk: (u32, Instant), // how often register_pk
@@ -50,7 +48,7 @@ impl Default for Peer {
             uuid: Bytes::new(),
             pk: Bytes::new(),
             info: Default::default(),
-            // user: None,
+            status: None,            
             // disabled: false,
             reg_pk: (0, get_expired_time()),
         }
@@ -68,7 +66,7 @@ pub(crate) struct PeerMap {
 impl PeerMap {
     pub(crate) async fn new() -> ResultType<Self> {
         let db = get_arg_opt("DB_URL").unwrap_or_else(|| {
-            let mut db = "db_v2.sqlite3".to_owned();
+            let db = "db_v2.sqlite3".to_owned();
             #[cfg(all(windows, not(debug_assertions)))]
             {
                 if let Some(path) = hbb_common::config::Config::icon_path().parent() {
@@ -129,7 +127,24 @@ impl PeerMap {
             }
             log::info!("pk updated instead of insert");
         }
-        register_pk_response::Result::OK
+        // Custom Code - put id firewall here?
+        match self.db.get_status(&id).await {
+			//Ok(Some(crate::database::STATUS_APPROVED)) => register_pk_response::Result::OK,
+			Ok(Some(crate::database::STATUS_APPROVED)) => {
+				log::info!("STATUS_APPROVED for {}", id);
+				register_pk_response::Result::OK
+			}
+
+			Ok(other) => {
+				log::warn!("Peer {} rejected ({:?})", id, other);
+				register_pk_response::Result::SERVER_ERROR
+			}
+
+			Err(err) => {
+				log::error!("Failed to read status for {}: {}", id, err);
+				register_pk_response::Result::SERVER_ERROR
+			}
+		}
     }
 
     #[inline]
@@ -137,21 +152,35 @@ impl PeerMap {
         let p = self.map.read().await.get(id).cloned();
         if p.is_some() {
             return p;
-        } else if let Ok(Some(v)) = self.db.get_peer(id).await {
-            let peer = Peer {
-                guid: v.guid,
-                uuid: v.uuid.into(),
-                pk: v.pk.into(),
-                // user: v.user,
-                info: serde_json::from_str::<PeerInfo>(&v.info).unwrap_or_default(),
-                // disabled: v.status == Some(0),
-                ..Default::default()
-            };
-            let peer = Arc::new(RwLock::new(peer));
-            self.map.write().await.insert(id.to_owned(), peer.clone());
-            return Some(peer);
-        }
-        None
+        } else {
+			match self.db.get_peer(id).await {
+				Ok(Some(v)) => {
+					//log::warn!(">>> PEER DB FALLBACK FOUND: id={}", id);
+
+					let peer = Peer {
+						guid: v.guid,
+						uuid: v.uuid.into(),
+						pk: v.pk.into(),
+						status: v.status,
+						info: serde_json::from_str::<PeerInfo>(&v.info).unwrap_or_default(),
+						..Default::default()
+					};
+
+					let peer = Arc::new(RwLock::new(peer));
+					self.map.write().await.insert(id.to_owned(), peer.clone());
+					return Some(peer);
+				}
+				Ok(None) => {
+					log::warn!(">>> PEER DB FALLBACK NOT FOUND: id={}", id);
+				}
+				Err(err) => {
+					log::error!(">>> PEER DB FALLBACK ERROR: id={}, error={:#}", id, err);
+				}
+			}
+		}
+		None
+		
+		
     }
 
     #[inline]
@@ -173,8 +202,48 @@ impl PeerMap {
         self.map.read().await.get(id).cloned()
     }
 
-    #[inline]
-    pub(crate) async fn is_in_memory(&self, id: &str) -> bool {
-        self.map.read().await.contains_key(id)
-    }
+	pub async fn api_list_peers(
+		&self,
+		status: Option<i64>,
+		page: u32,
+		limit: u32,
+	) -> ResultType<Vec<database::Peer>> {
+		self.db.list_peers(status, page, limit).await
+	}
+	
+	pub async fn api_count_peers(
+		&self,
+		status: Option<i64>,
+	) -> ResultType<u64> {
+		self.db.count_peers(status).await
+	}
+
+	pub async fn api_get_peer(
+		&self,
+		id: &str,
+	) -> ResultType<Option<database::Peer>> {
+		self.db.get_peer_summary(id).await
+	}
+
+	pub async fn api_set_status(
+		&self,
+		id: &str,
+		status: i64,
+	) -> ResultType<()> {
+		self.db.set_status(id, status).await?;
+
+		if let Some(peer) = self.get_in_memory(id).await {
+			peer.write().await.status = Some(status);
+		}
+
+		Ok(())
+	}
+
+	pub async fn api_set_note(
+		&self,
+		id: &str,
+		note: Option<&str>,
+	) -> ResultType<()> {
+		self.db.set_note(id, note).await
+	}
 }

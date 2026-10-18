@@ -47,11 +47,13 @@ regex = "1.4"
 tower-http = { version = "0.3", features = ["fs", "trace", "cors"] }
 http = "0.2"
 flexi_logger = { version = "0.22", features = ["async", "use_chrono_for_offset", "dont_minimize_extra_stacks"] }
+log = "0.4"
 ipnetwork = "0.20"
 local-ip-address = "0.5.1"
 dns-lookup = "1.0.8"
 ping = "0.4.0"
 flate2 = "1.0"
+tokio = { version = "1", features = ["full"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 # https://github.com/rustdesk/rustdesk-server-pro/issues/189, using native-tls for better tls support

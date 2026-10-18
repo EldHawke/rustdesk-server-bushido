@@ -1,5 +1,6 @@
 use crate::common::*;
 use crate::peer::*;
+use crate::api;
 use hbb_common::{
     allow_err, bail,
     bytes::{Bytes, BytesMut},
@@ -56,7 +57,19 @@ enum Sink {
 }
 type Sender = mpsc::UnboundedSender<Data>;
 type Receiver = mpsc::UnboundedReceiver<Data>;
+
+#[derive(Clone, Debug)]
+struct TcpConnectionState {
+    connection_id: u64,    
+    messages: u64,
+    target_id: Option<String>,
+}
+
+type TcpConnections = Arc<Mutex<HashMap<SocketAddr, TcpConnectionState>>>;
+
 static ROTATION_RELAY_SERVER: AtomicUsize = AtomicUsize::new(0);
+// #CHATGPT: Stable per-process connection IDs for end-to-end tracing.
+static TCP_CONNECTION_ID: AtomicUsize = AtomicUsize::new(1);
 type RelayServers = Vec<String>;
 const CHECK_RELAY_TIMEOUT: u64 = 3_000;
 static ALWAYS_USE_RELAY: AtomicBool = AtomicBool::new(false);
@@ -82,6 +95,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct RendezvousServer {
     tcp_punch: Arc<Mutex<HashMap<SocketAddr, Sink>>>,
+    tcp_connections: TcpConnections,
     pm: PeerMap,
     tx: Sender,
     relay_servers: Arc<RelayServers>,
@@ -98,12 +112,55 @@ enum LoopFailure {
     ConsoleListener,
 }
 
-impl RendezvousServer {
-    pub fn start(port: i32, serial: i32, key: &str, rmem: usize) -> ResultType<()> {
-        Self::start_with_bind(None, port, serial, key, rmem)
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientStatus {    
+    Waiting,
+    Approved,
+    Blocked,    
+}
 
-    #[tokio::main(flavor = "multi_thread")]
+impl RendezvousServer {
+    /*pub fn start(port: i32, serial: i32, key: &str, rmem: usize) -> ResultType<()> {
+        Self::start_with_bind(None, port, serial, key, rmem)
+    }*/
+	
+	pub async fn start(
+		port: i32,
+		serial: i32,
+		key: &str,
+		rmem: usize,
+	) -> ResultType<()> {
+		Self::start_with_bind(None, port, serial, key, rmem).await
+	}
+	
+	async fn get_client_status(&self, id: &str) -> ResultType<ClientStatus> {
+		match self.pm.db.get_status(id).await {
+			Ok(Some(1)) => Ok(ClientStatus::Approved),
+
+			Ok(Some(0)) => Ok(ClientStatus::Waiting),
+
+			Ok(Some(2)) => Ok(ClientStatus::Blocked),
+
+			Ok(Some(v)) => {
+				log::warn!("{} unknown status {}", id, v);
+				Ok(ClientStatus::Blocked)
+			}
+
+			Ok(None) => {
+				log::warn!("{} not found in database", id);
+
+				// insert client as Waiting (0)
+
+				Ok(ClientStatus::Waiting)
+			}
+
+			Err(e) => {
+				log::warn!("{} DB error: {}", id, e);
+				Err(e)
+			}
+		}
+	}
+
     pub async fn start_with_bind(
         bind_addr: Option<IpAddr>,
         port: i32,
@@ -115,6 +172,14 @@ impl RendezvousServer {
         let nat_port = port - 1;
         let ws_port = port + 2;
         let pm = PeerMap::new().await?;
+
+        tokio::spawn({
+			let pm = pm.clone();
+			async move {
+				api::start_api(pm).await;
+			}
+		});
+
         log::info!("serial={}", serial);
         let rendezvous_servers = get_servers(&get_arg("rendezvous-servers"), "rendezvous-servers");
         let mut socket = create_udp_listener(bind_addr, port, rmem).await?;
@@ -137,6 +202,7 @@ impl RendezvousServer {
         };
         let mut rs = Self {
             tcp_punch: Arc::new(Mutex::new(HashMap::new())),
+            tcp_connections: Arc::new(Mutex::new(HashMap::new())),
             pm,
             tx: tx.clone(),
             relay_servers: Default::default(),
@@ -268,7 +334,9 @@ impl RendezvousServer {
                 }
                 Some(data) = rx.recv() => {
                     match data {
-                        Data::Msg(msg, addr) => { allow_err!(socket.send(msg.as_ref(), addr).await); }
+                        Data::Msg(msg, addr) => {
+							allow_err!(socket.send(msg.as_ref(), addr).await); 
+						}
                         Data::RelayServers0(rs) => { self.parse_relay_servers(&rs); }
                         Data::RelayServers(rs) => { self.relay_servers = Arc::new(rs); }
                     }
@@ -276,7 +344,7 @@ impl RendezvousServer {
                 res = socket.next() => {
                     match res {
                         Some(Ok((bytes, addr))) => {
-                            if let Err(err) = self.handle_udp(&bytes, addr.into(), socket, key).await {
+                            if let Err(err) = self.handle_udp(&bytes, addr.into(), socket).await {
                                 log::error!("udp failure: {}", err);
                                 return LoopFailure::UdpSocket;
                             }
@@ -347,14 +415,54 @@ impl RendezvousServer {
         &mut self,
         bytes: &BytesMut,
         addr: SocketAddr,
-        socket: &mut FramedSocket,
-        key: &str,
+        socket: &mut FramedSocket,        
     ) -> ResultType<()> {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(bytes) {
             match msg_in.union {
                 Some(rendezvous_message::Union::RegisterPeer(rp)) => {
-                    // B registered
+                    
+                    if rp.id == "(:test_hbbs:)" {
+						//log::trace!("Internal hbbs self-test");
+
+						self.update_addr(rp.id, addr, socket).await?;
+
+						if self.inner.serial > rp.serial {
+							let mut msg_out = RendezvousMessage::new();
+							msg_out.set_configure_update(ConfigUpdate {
+								serial: self.inner.serial,
+								rendezvous_servers: (*self.rendezvous_servers).clone(),
+								..Default::default()
+							});
+
+							socket.send(&msg_out, addr).await?;
+						}
+
+						return Ok(());
+					}
+
                     if !rp.id.is_empty() {
+
+                        let status = match self.get_client_status(&rp.id).await {
+							Ok(status) => status,
+							Err(_) => return Ok(()),
+						};
+
+						match status {
+							ClientStatus::Approved => {
+								//log::warn!("{} approved", rp.id);
+							}
+
+							ClientStatus::Waiting => {
+								//log::warn!("{} waiting approval", rp.id);
+								return Ok(());
+							}
+							
+							ClientStatus::Blocked => {
+								//log::warn!("{} blocked", rp.id);
+								return Ok(());
+							}
+						}
+
                         log::trace!("New peer registered: {:?} {:?}", &rp.id, &addr);
                         self.update_addr(rp.id, addr, socket).await?;
                         if self.inner.serial > rp.serial {
@@ -369,11 +477,26 @@ impl RendezvousServer {
                     }
                 }
                 Some(rendezvous_message::Union::RegisterPk(rk)) => {
+                    if rk.id == "(:test_hbbs:)" {
+						return Ok(());
+					}
+
                     if rk.uuid.is_empty() || rk.pk.is_empty() {
                         return Ok(());
                     }
                     let id = rk.id;
                     let ip = addr.ip().to_string();
+
+                    let status = match self.get_client_status(&id).await {
+						Ok(status) => status,
+						Err(_) => return Ok(()),
+					};
+
+                    match status {
+                        ClientStatus::Approved => {}
+                        ClientStatus::Waiting | ClientStatus::Blocked => return Ok(()),
+                    }
+                    
                     if id.len() < 6 {
                         return send_rk_res(socket, addr, UUID_MISMATCH).await;
                     } else if !self.check_ip_blocker(&ip, &id).await {
@@ -444,8 +567,8 @@ impl RendezvousServer {
                         }
                     }
                     if changed {
-                        self.pm.update_pk(id, peer, addr, rk.uuid, rk.pk, ip).await;
-                    }
+						self.pm.update_pk(id.clone(), peer, addr, rk.uuid, rk.pk, ip).await;
+					}
                     let mut msg_out = RendezvousMessage::new();
                     msg_out.set_register_pk_response(RegisterPkResponse {
                         result: register_pk_response::Result::OK.into(),
@@ -453,14 +576,14 @@ impl RendezvousServer {
                     });
                     socket.send(&msg_out, addr).await?
                 }
-                Some(rendezvous_message::Union::PunchHoleRequest(ph)) => {
+                Some(rendezvous_message::Union::PunchHoleRequest(_)) => {
                     // UDP PunchHoleRequest is intentionally unsupported.
                     // The supported client path sends PunchHoleRequest over TCP/WS.
                 }
-                Some(rendezvous_message::Union::PunchHoleSent(phs)) => {
+                Some(rendezvous_message::Union::PunchHoleSent(_)) => {
                     // UDP PunchHoleSent is intentionally unsupported to avoid UDP reflection/amplification
                 }
-                Some(rendezvous_message::Union::LocalAddr(la)) => {
+                Some(rendezvous_message::Union::LocalAddr(_)) => {
                     // UDP LocalAddr is intentionally unsupported to avoid UDP reflection/amplification
                 }
                 Some(rendezvous_message::Union::ConfigureUpdate(mut cu)) => {
@@ -508,6 +631,7 @@ impl RendezvousServer {
         addr: SocketAddr,
         key: &str,
         ws: bool,
+        connection_id: u64,
     ) -> bool {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(bytes) {
             match msg_in.union {
@@ -516,7 +640,7 @@ impl RendezvousServer {
                     if let Some(sink) = sink.take() {
                         self.tcp_punch.lock().await.insert(try_into_v4(addr), sink);
                     }
-                    allow_err!(self.handle_tcp_punch_hole_request(addr, ph, key, ws).await);
+                    allow_err!(self.handle_tcp_punch_hole_request(addr, ph, key, ws, connection_id).await);
                     return true;
                 }
                 Some(rendezvous_message::Union::RequestRelay(mut rf)) => {
@@ -676,6 +800,7 @@ impl RendezvousServer {
     ) -> ResultType<()> {
         // relay local addrs of B to A
         let addr_a = AddrMangle::decode(&la.socket_addr);
+
         log::debug!(
             "{} local addrs response to {:?} from {:?}",
             if socket.is_none() { "TCP" } else { "UDP" },
@@ -706,8 +831,24 @@ impl RendezvousServer {
         ph: PunchHoleRequest,
         key: &str,
         ws: bool,
+        connection_id: Option<u64>,
     ) -> ResultType<(RendezvousMessage, Option<SocketAddr>)> {
         let mut ph = ph;
+
+        let requester_id = ph.requester_id.clone();
+		log::info!(
+			"PUNCH_HOLE_REQUEST: requester_id={} target_id={}",
+			requester_id,
+			ph.id
+		);
+
+        if let Some(connection_id) = connection_id {
+            if let Some(state) = self.tcp_connections.lock().await.get_mut(&try_into_v4(addr)) {
+                if state.connection_id == connection_id {
+                    state.target_id = Some(ph.id.clone());
+                }
+            }
+        }
         if !key.is_empty() && ph.licence_key != key {
             log::warn!("Authentication failed from {} for peer {} - invalid key", addr, ph.id);
             let mut msg_out = RendezvousMessage::new();
@@ -718,12 +859,40 @@ impl RendezvousServer {
             return Ok((msg_out, None));
         }
         let id = ph.id;
+
+        match self.pm.db.get_status(&id).await {
+			Ok(Some(1)) => {}
+			Ok(Some(status)) => {
+				log::warn!("Peer {} blocked during punch hole (status={})", id, status);
+
+				let mut msg_out = RendezvousMessage::new();
+				msg_out.set_punch_hole_response(PunchHoleResponse {
+					failure: punch_hole_response::Failure::OFFLINE.into(),
+					..Default::default()
+				});
+
+				return Ok((msg_out, None));
+			}
+			Ok(None) => {
+				log::warn!("Peer {} has no status", id);
+				return Ok((RendezvousMessage::new(), None));
+			}
+			Err(err) => {
+				log::error!("Status check failed for {}: {}", id, err);
+				return Ok((RendezvousMessage::new(), None));
+			}
+		}
+
         // punch hole request from A, relay to B,
         // check if in same intranet first,
         // fetch local addrs if in same intranet.
         // because punch hole won't work if in the same intranet,
         // all routers will drop such self-connections.
-        if let Some(peer) = self.pm.get(&id).await {
+        //if let Some(peer) = self.pm.get(&id).await {		
+		let peer_lookup = self.pm.get(&id).await;
+		
+		if let Some(peer) = peer_lookup {
+
             let (elapsed, peer_addr) = {
                 let r = peer.read().await;
                 (r.last_reg_time.elapsed().as_millis() as i64, r.socket_addr)
@@ -796,6 +965,7 @@ impl RendezvousServer {
                     socket_addr,
                     nat_type: ph.nat_type,
                     relay_server,
+                    force_relay: true,
                     ..Default::default()
                 });
             }
@@ -881,31 +1051,16 @@ impl RendezvousServer {
         ph: PunchHoleRequest,
         key: &str,
         ws: bool,
+        connection_id: u64,
     ) -> ResultType<()> {
-        let (msg, to_addr) = self.handle_punch_hole_request(addr, ph, key, ws).await?;
+        let (msg, to_addr) = self
+            .handle_punch_hole_request(addr, ph, key, ws, Some(connection_id))
+            .await?;
         if let Some(addr) = to_addr {
             self.tx.send(Data::Msg(msg.into(), addr))?;
         } else {
             self.send_to_tcp_sync(msg, addr).await?;
         }
-        Ok(())
-    }
-
-    #[inline]
-    async fn handle_udp_punch_hole_request(
-        &mut self,
-        addr: SocketAddr,
-        ph: PunchHoleRequest,
-        key: &str,
-    ) -> ResultType<()> {
-        let (msg, to_addr) = self.handle_punch_hole_request(addr, ph, key, false).await?;
-        self.tx.send(Data::Msg(
-            msg.into(),
-            match to_addr {
-                Some(addr) => addr,
-                None => addr,
-            },
-        ))?;
         Ok(())
     }
 
@@ -1074,7 +1229,7 @@ impl RendezvousServer {
                 let arg = fds.next();
                 if let Some("-") = arg { lock.clear(); }
                 else {
-                    let mut start = arg.and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
+                    let start = arg.and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
                     let mut page_size = fds.next().and_then(|x| x.parse::<usize>().ok()).unwrap_or(10);
                     if page_size == 0 { page_size = 10; }
                     for (_, e) in lock.iter().enumerate().skip(start).take(page_size) {
@@ -1177,7 +1332,8 @@ impl RendezvousServer {
         key: &str,
         ws: bool,
     ) -> ResultType<()> {
-        let mut sink;
+        let mut sink;        
+        let connection_id = TCP_CONNECTION_ID.fetch_add(1, Ordering::Relaxed) as u64;
         if ws {
             use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
             let callback = |req: &Request, response: Response| {
@@ -1207,9 +1363,33 @@ impl RendezvousServer {
             let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;
             let (a, mut b) = ws_stream.split();
             sink = Some(Sink::Ws(a));
+
+            self.tcp_connections.lock().await.insert(
+				//addr,
+				try_into_v4(addr),
+				TcpConnectionState {
+					connection_id,					
+					messages: 0,
+					//source_ip: addr.ip(),
+					target_id: None,
+				},
+			);
+
             while let Ok(Some(Ok(msg))) = timeout(30_000, b.next()).await {
                 if let tungstenite::Message::Binary(bytes) = msg {
-                    if !self.handle_tcp(&bytes, &mut sink, addr, key, ws).await {
+                    // #CHATGPT: Update only this connection's message counter.
+					if let Some(state) = self
+						.tcp_connections
+						.lock()
+						.await
+						.get_mut(&try_into_v4(addr))
+					{
+						if state.connection_id == connection_id {
+							state.messages += 1;
+						}
+					}
+
+                    if !self.handle_tcp(&bytes, &mut sink, addr, key, ws, connection_id).await {
                         break;
                     }
                 }
@@ -1217,12 +1397,45 @@ impl RendezvousServer {
         } else {
             let (a, mut b) = Framed::new(stream, BytesCodec::new()).split();
             sink = Some(Sink::TcpStream(a));
-            while let Ok(Some(Ok(bytes))) = timeout(30_000, b.next()).await {
-                if !self.handle_tcp(&bytes, &mut sink, addr, key, ws).await {
+
+            self.tcp_connections.lock().await.insert(
+				//addr,
+				try_into_v4(addr),
+				TcpConnectionState {
+					connection_id,					
+					messages: 0,
+					//source_ip: addr.ip(),
+					target_id: None,
+				},
+			);
+            while let Ok(Some(Ok(bytes))) = timeout(30_000, b.next()).await {                
+                
+                if let Some(state) = self
+					.tcp_connections
+					.lock()
+					.await
+					.get_mut(&try_into_v4(addr))
+				{
+					state.messages += 1;
+				}
+
+                if !self.handle_tcp(&bytes, &mut sink, addr, key, ws, connection_id).await {
                     break;
                 }
             }
         }
+        
+        let state_key = try_into_v4(addr);
+        let mut connections = self.tcp_connections.lock().await;
+
+        if connections
+            .get(&state_key)
+            .map(|state| state.connection_id == connection_id)
+            .unwrap_or(false)
+        {
+            connections.remove(&state_key);
+        }
+
         if sink.is_none() {
             self.tcp_punch.lock().await.remove(&try_into_v4(addr));
         }

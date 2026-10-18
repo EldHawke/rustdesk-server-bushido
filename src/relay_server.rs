@@ -30,8 +30,14 @@ use std::{
 
 type Usage = (usize, usize, usize, usize);
 
+struct PendingRelay {
+    stream: Box<dyn StreamTrait>,
+    claimed_id: String,
+    source_addr: SocketAddr,
+}
+
 lazy_static::lazy_static! {
-    static ref PEERS: Mutex<HashMap<String, Box<dyn StreamTrait>>> = Default::default();
+    static ref PEERS: Mutex<HashMap<String, PendingRelay>> = Default::default();
     static ref USAGE: RwLock<HashMap<String, Usage>> = Default::default();
     static ref BLACKLIST: RwLock<HashSet<String>> = Default::default();
     static ref BLOCKLIST: RwLock<HashSet<String>> = Default::default();
@@ -51,6 +57,7 @@ pub async fn start_with_bind(
     port: &str,
     key: &str,
 ) -> ResultType<()> {
+    let _session_db = crate::relay_sessions::init().await?;
     let key = get_server_sk(key);
     if let Ok(mut file) = std::fs::File::open(BLACKLIST_FILE) {
         let mut contents = String::new();
@@ -94,6 +101,7 @@ pub async fn start_with_bind(
                 crate::common::listen_tcp(bind_addr, port2).await?,
                 crate::common::listen_console(bind_addr, port).await?,
                 &key,
+                _session_db.clone(),
             )
             .await;
         }
@@ -338,49 +346,59 @@ async fn io_loop(
     listener2: TcpListener,
     listener_console: Option<TcpListener>,
     key: &str,
+    session_db: sqlx::SqlitePool,
 ) {
     check_params();
     let limiter = <Limiter>::new(TOTAL_BANDWIDTH.load(Ordering::SeqCst) as _);
     loop {
-        tokio::select! {
-            res = listener.accept() => {
-                match res {
-                    Ok((stream, addr))  => {
-                        stream.set_nodelay(true).ok();
-                        handle_connection(stream, addr, &limiter, key, false).await;
-                    }
-                    Err(err) => {
-                       log::error!("listener.accept failed: {}", err);
-                       break;
-                    }
-                }
-            }
-            res = listener2.accept() => {
-                match res {
-                    Ok((stream, addr))  => {
-                        stream.set_nodelay(true).ok();
-                        handle_connection(stream, addr, &limiter, key, true).await;
-                    }
-                    Err(err) => {
-                       log::error!("listener2.accept failed: {}", err);
-                       break;
-                    }
-                }
-            }
-            res = crate::common::accept_or_pending(listener_console.as_ref()) => {
-                match res {
-                    Ok((stream, addr))  => {
-                        stream.set_nodelay(true).ok();
-                        handle_connection(stream, addr, &limiter, key, false).await;
-                    }
-                    Err(err) => {
-                       log::error!("console listener.accept failed: {}", err);
-                       break;
-                    }
-                }
-            }
-        }
-    }
+		tokio::select! {
+			res = listener.accept() => {
+				match res {
+					Ok((stream, addr)) => {
+						stream.set_nodelay(true).ok();
+						handle_connection(
+							stream, addr, &limiter, key, false,
+							session_db.clone(),
+						).await;
+					}
+					Err(err) => {
+						log::error!("listener.accept failed: {}", err);
+						break;
+					}
+				}
+			}
+			res = listener2.accept() => {
+				match res {
+					Ok((stream, addr)) => {
+						stream.set_nodelay(true).ok();
+						handle_connection(
+							stream, addr, &limiter, key, true,
+							session_db.clone(),
+						).await;
+					}
+					Err(err) => {
+						log::error!("listener2.accept failed: {}", err);
+						break;
+					}
+				}
+			}
+			res = crate::common::accept_or_pending(listener_console.as_ref()) => {
+				match res {
+					Ok((stream, addr)) => {
+						stream.set_nodelay(true).ok();
+						handle_connection(
+							stream, addr, &limiter, key, false,
+							session_db.clone(),
+						).await;
+					}
+					Err(err) => {
+						log::error!("console listener.accept failed: {}", err);
+						break;
+					}
+				}
+			}
+		}
+	}
 }
 
 async fn handle_connection(
@@ -389,6 +407,7 @@ async fn handle_connection(
     limiter: &Limiter,
     key: &str,
     ws: bool,
+    session_db: sqlx::SqlitePool,
 ) {
     let ip = hbb_common::try_into_v4(addr).ip();
     if !ws && ip.is_loopback() {
@@ -413,7 +432,9 @@ async fn handle_connection(
     let key = key.to_owned();
     let limiter = limiter.clone();
     tokio::spawn(async move {
-        allow_err!(make_pair(stream, addr, &key, limiter, ws).await);
+        allow_err!(
+            make_pair(stream, addr, &key, limiter, ws, session_db).await
+        );
     });
 }
 
@@ -423,6 +444,7 @@ async fn make_pair(
     key: &str,
     limiter: Limiter,
     ws: bool,
+    session_db: sqlx::SqlitePool,
 ) -> ResultType<()> {
     if ws {
         use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -451,14 +473,20 @@ async fn make_pair(
             Ok(response)
         };
         let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;
-        make_pair_(ws_stream, addr, key, limiter).await;
+        make_pair_(ws_stream, addr, key, limiter, session_db.clone()).await;
     } else {
-        make_pair_(FramedStream::from(stream, addr), addr, key, limiter).await;
+        make_pair_(FramedStream::from(stream, addr), addr, key, limiter, session_db.clone()).await;
     }
     Ok(())
 }
 
-async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limiter: Limiter) {
+async fn make_pair_(
+    stream: impl StreamTrait,
+    addr: SocketAddr,
+    key: &str,
+    limiter: Limiter,
+    session_db: sqlx::SqlitePool,
+) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
@@ -471,23 +499,67 @@ async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limit
                     let mut peer = PEERS.lock().await.remove(&rf.uuid);
                     if let Some(peer) = peer.as_mut() {
                         log::info!("Relayrequest {} from {} got paired", rf.uuid, addr);
+
+                        if let Err(err) = crate::relay_sessions::create_session(
+							&session_db,
+							&rf.uuid,
+							&peer.claimed_id,
+							&rf.id,
+							&peer.source_addr.to_string(),
+							&addr.to_string(),
+						)
+						.await
+						{
+							log::error!(
+								"Failed to record relay session {}: {}",
+								rf.uuid,
+								err
+							);
+						}
+
                         let id = format!("{}:{}", addr.ip(), addr.port());
                         USAGE.write().await.insert(id.clone(), Default::default());
-                        if !stream.is_ws() && !peer.is_ws() {
-                            peer.set_raw();
+                        if !stream.is_ws() && !peer.stream.is_ws() {
+                            peer.stream.set_raw();
                             stream.set_raw();
                             log::info!("Both are raw");
                         }
-                        if let Err(err) = relay(addr, &mut stream, peer, limiter, id.clone()).await
-                        {
-                            log::info!("Relay of {} closed: {}", addr, err);
-                        } else {
-                            log::info!("Relay of {} closed", addr);
-                        }
-                        USAGE.write().await.remove(&id);
+                        if let Err(err) = relay(
+							addr,
+							&mut stream,
+							&mut peer.stream,
+							limiter,
+							id.clone(),
+						)
+						.await
+						{
+							log::info!("Relay of {} closed: {}", addr, err);
+						} else {
+							log::info!("Relay of {} closed", addr);
+						}
+
+						if let Err(err) =
+							crate::relay_sessions::close_session(&session_db, &rf.uuid).await
+						{
+							log::error!(
+								"Failed to close relay session {}: {}",
+								rf.uuid,
+								err
+							);
+						}
+
+						USAGE.write().await.remove(&id);
+
                     } else {
-                        log::info!("New relay request {} from {}", rf.uuid, addr);
-                        PEERS.lock().await.insert(rf.uuid.clone(), Box::new(stream));
+                        log::info!("New relay request {} from {}", rf.uuid, addr);                        
+                        PEERS.lock().await.insert(
+                            rf.uuid.clone(),
+                            PendingRelay {
+                                stream: Box::new(stream),
+                                claimed_id: rf.id.clone(),
+                                source_addr: addr,
+                            },
+                        );
                         sleep(30.).await;
                         PEERS.lock().await.remove(&rf.uuid);
                     }

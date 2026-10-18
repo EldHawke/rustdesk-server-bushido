@@ -4,10 +4,12 @@ use sqlx::{
     sqlite::SqliteConnectOptions, ConnectOptions, Connection, Error as SqlxError, SqliteConnection,
 };
 use std::{ops::DerefMut, str::FromStr};
-//use sqlx::postgres::PgPoolOptions;
-//use sqlx::mysql::MySqlPoolOptions;
 
 type Pool = deadpool::managed::Pool<DbPool>;
+
+pub const STATUS_WAITING: i64 = 0;
+pub const STATUS_APPROVED: i64 = 1;
+pub const STATUS_BLOCKED: i64 = 2;
 
 pub struct DbPool {
     url: String,
@@ -35,7 +37,7 @@ pub struct Database {
     pool: Pool,
 }
 
-#[derive(Default)]
+#[derive(sqlx::FromRow, Default)]
 pub struct Peer {
     pub guid: Vec<u8>,
     pub id: String,
@@ -44,6 +46,7 @@ pub struct Peer {
     pub user: Option<Vec<u8>>,
     pub info: String,
     pub status: Option<i64>,
+    pub note: Option<String>,
 }
 
 impl Database {
@@ -93,14 +96,165 @@ impl Database {
     }
 
     pub async fn get_peer(&self, id: &str) -> ResultType<Option<Peer>> {
-        Ok(sqlx::query_as!(
-            Peer,
-            "select guid, id, uuid, pk, user, status, info from peer where id = ?",
-            id
-        )
-        .fetch_optional(self.pool.get().await?.deref_mut())
-        .await?)
+        Ok(sqlx::query_as::<_, Peer>(
+			"SELECT guid, id, uuid, pk, user, status, note, info FROM peer WHERE id = ?"
+		)
+		.bind(id)
+		.fetch_optional(self.pool.get().await?.deref_mut())
+		.await?)
     }
+	
+	pub async fn list_peers(
+		&self,
+		status: Option<i64>,
+		page: u32,
+		limit: u32,
+	) -> ResultType<Vec<Peer>> {
+
+		let offset = ((page.max(1) - 1) * limit.max(1)) as i64;
+		let limit = limit.max(1) as i64;
+
+		let peers = if let Some(status) = status {
+
+			sqlx::query_as::<_, Peer>(
+				r#"
+				SELECT
+					guid,
+					id,
+					uuid,
+					pk,
+					user,
+					status,
+					note,
+					info
+				FROM peer
+				WHERE status = ?
+				ORDER BY created_at DESC
+				LIMIT ?
+				OFFSET ?
+				"#
+			)
+			.bind(status)
+			.bind(limit)
+			.bind(offset)
+			.fetch_all(self.pool.get().await?.deref_mut())
+			.await?
+
+		} else {
+
+			sqlx::query_as::<_, Peer>(
+				r#"
+				SELECT
+					guid,
+					id,
+					uuid,
+					pk,
+					user,
+					status,
+					note,
+					info
+				FROM peer
+				ORDER BY created_at DESC
+				LIMIT ?
+				OFFSET ?
+				"#
+			)
+			.bind(limit)
+			.bind(offset)
+			.fetch_all(self.pool.get().await?.deref_mut())
+			.await?
+
+		};
+
+		Ok(peers)
+	}
+	
+	pub async fn count_peers(
+		&self,
+		status: Option<i64>,
+	) -> ResultType<u64> {
+		let count: i64 = if let Some(status) = status {
+			sqlx::query_scalar("SELECT COUNT(*) FROM peer WHERE status = ?")
+				.bind(status)
+				.fetch_one(self.pool.get().await?.deref_mut())
+				.await?
+		} else {
+			sqlx::query_scalar("SELECT COUNT(*) FROM peer")
+				.fetch_one(self.pool.get().await?.deref_mut())
+				.await?
+		};
+
+		Ok(count as u64)
+	}
+	
+	pub async fn get_peer_summary(
+		&self,
+		id: &str,
+	) -> ResultType<Option<Peer>> {
+
+		Ok(
+			sqlx::query_as::<_, Peer>(
+				r#"
+				SELECT
+					guid,
+					id,
+					uuid,
+					pk,
+					user,
+					status,
+					note,
+					info
+				FROM peer
+				WHERE id = ?
+				"#
+			)
+			.bind(id)
+			.fetch_optional(self.pool.get().await?.deref_mut())
+			.await?
+		)
+	}
+
+	pub async fn set_status(
+		&self,
+		id: &str,
+		status: i64,
+	) -> ResultType<()> {
+
+		sqlx::query!(
+			r#"
+			UPDATE peer
+			SET status = ?
+			WHERE id = ?
+			"#,
+			status,
+			id
+		)
+		.execute(self.pool.get().await?.deref_mut())
+		.await?;
+
+		Ok(())
+	}
+
+	pub async fn set_note(
+			&self,
+			id: &str,
+			note: Option<&str>,
+	) -> ResultType<()> {
+
+			sqlx::query!(
+					r#"
+					UPDATE peer
+					SET note = ?
+					WHERE id = ?
+					"#,
+					note,
+					id
+			)
+			.execute(self.pool.get().await?.deref_mut())
+			.await?;
+
+			Ok(())
+	}
 
     pub async fn insert_peer(
         &self,
@@ -111,11 +265,12 @@ impl Database {
     ) -> ResultType<Vec<u8>> {
         let guid = uuid::Uuid::new_v4().as_bytes().to_vec();
         sqlx::query!(
-            "insert into peer(guid, id, uuid, pk, info) values(?, ?, ?, ?, ?)",
+            "insert into peer(guid, id, uuid, pk, status, info) values(?, ?, ?, ?, ?, ?)",
             guid,
             id,
             uuid,
             pk,
+            STATUS_WAITING,
             info
         )
         .execute(self.pool.get().await?.deref_mut())
@@ -141,6 +296,18 @@ impl Database {
         .await?;
         Ok(())
     }
+
+    pub async fn get_status(&self, id: &str) -> ResultType<Option<i64>> {
+		//log::warn!("DB get_status({})", id);
+		let row = sqlx::query!(
+			"select status from peer where id = ?",
+			id
+		)
+		.fetch_optional(self.pool.get().await?.deref_mut())
+		.await?;
+
+		Ok(row.and_then(|r| r.status))
+	}
 }
 
 #[cfg(test)]
