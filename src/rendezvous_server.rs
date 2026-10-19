@@ -835,6 +835,47 @@ impl RendezvousServer {
     ) -> ResultType<(RendezvousMessage, Option<SocketAddr>)> {
         let mut ph = ph;
 
+        // Temporary ID-to-ID firewall test rules.
+        // Each direction is authorized independently.
+        const TEST_A_ID: &str = "1753910904";
+        const TEST_B_ID: &str = "169157096";
+
+        const ALLOW_A_TO_B: bool = true;
+        const ALLOW_B_TO_A: bool = false;
+
+        let requester_id = ph.requester_id.clone();
+        let target_id = ph.id.clone();
+
+        let allowed = if requester_id == TEST_A_ID && target_id == TEST_B_ID {
+            ALLOW_A_TO_B
+        } else if requester_id == TEST_B_ID && target_id == TEST_A_ID {
+            ALLOW_B_TO_A
+        } else {
+            false
+        };
+
+        if !allowed {
+            log::warn!(
+                "ID_FIREWALL: DENIED requester_id={} target_id={}",
+                requester_id,
+                target_id
+            );
+
+            let mut msg_out = RendezvousMessage::new();
+            msg_out.set_punch_hole_response(PunchHoleResponse {
+                failure: punch_hole_response::Failure::OFFLINE.into(),
+                ..Default::default()
+            });
+
+            return Ok((msg_out, None));
+        }
+
+        log::info!(
+            "ID_FIREWALL: ALLOWED requester_id={} target_id={}",
+            requester_id,
+            target_id
+        );
+
         let requester_id = ph.requester_id.clone();
 		log::info!(
 			"PUNCH_HOLE_REQUEST: requester_id={} target_id={}",
