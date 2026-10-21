@@ -500,7 +500,9 @@ async fn make_pair_(
                     if let Some(peer) = peer.as_mut() {
                         log::info!("Relayrequest {} from {} got paired", rf.uuid, addr);
 
-                        if let Err(err) = crate::relay_sessions::create_session(
+
+                        //Original logging for relay connections
+                        /*if let Err(err) = crate::relay_sessions::create_session(
 							&session_db,
 							&rf.uuid,
 							&peer.claimed_id,
@@ -515,7 +517,7 @@ async fn make_pair_(
 								rf.uuid,
 								err
 							);
-						}
+						}*/
 
                         let id = format!("{}:{}", addr.ip(), addr.port());
                         USAGE.write().await.insert(id.clone(), Default::default());
@@ -538,7 +540,8 @@ async fn make_pair_(
 							log::info!("Relay of {} closed", addr);
 						}
 
-						if let Err(err) =
+                        //Original logging for relay connections
+						/*if let Err(err) =
 							crate::relay_sessions::close_session(&session_db, &rf.uuid).await
 						{
 							log::error!(
@@ -546,7 +549,7 @@ async fn make_pair_(
 								rf.uuid,
 								err
 							);
-						}
+						}*/
 
 						USAGE.write().await.remove(&id);
 
