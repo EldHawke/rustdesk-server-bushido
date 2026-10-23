@@ -303,6 +303,15 @@ impl Database {
 
         Ok(row.and_then(|r| r.0))
 	}
+
+	pub async fn ensure_peer_waiting(&self, id: &str) -> ResultType<()> {
+		sqlx::query("INSERT INTO peer (id, status) VALUES (?, 0) ON CONFLICT(id) DO NOTHING")
+			.bind(id)
+			.execute(self.pool.get().await?.deref_mut())
+			.await?;
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
