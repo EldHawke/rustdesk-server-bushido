@@ -146,21 +146,13 @@ impl RendezvousServer {
 				Ok(ClientStatus::Blocked)
 			}
 
-			// Ok(None) => {
-			// 	log::warn!("{} not found in database", id);
+			Ok(None) => {
+				log::warn!("{} not found in database", id);
 
-			// 	// insert client as Waiting (0)
+				// insert client as Waiting (0)
 
-			// 	Ok(ClientStatus::Waiting)
-			// }
-
-            Ok(None) => {
-                log::info!("{} not found in database, registering as Waiting", id);
-
-                self.pm.db.ensure_peer_waiting(id).await?;
-
-                Ok(ClientStatus::Waiting)
-            }
+				Ok(ClientStatus::Waiting)
+			}
 
 			Err(e) => {
 				log::warn!("{} DB error: {}", id, e);
