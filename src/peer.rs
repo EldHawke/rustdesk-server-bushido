@@ -127,24 +127,27 @@ impl PeerMap {
             }
             log::info!("pk updated instead of insert");
         }
-        // Custom Code - put id firewall here?
-        match self.db.get_status(&id).await {
-			//Ok(Some(crate::database::STATUS_APPROVED)) => register_pk_response::Result::OK,
-			Ok(Some(crate::database::STATUS_APPROVED)) => {
-				log::info!("STATUS_APPROVED for {}", id);
-				register_pk_response::Result::OK
-			}
+        //Custom code test
+        // match self.db.get_status(&id).await {
+		// 	//Ok(Some(crate::database::STATUS_APPROVED)) => register_pk_response::Result::OK,
+		// 	Ok(Some(crate::database::STATUS_APPROVED)) => {
+		// 		log::info!("STATUS_APPROVED for {}", id);
+		// 		register_pk_response::Result::OK
+		// 	}
 
-			Ok(other) => {
-				log::warn!("Peer {} rejected ({:?})", id, other);
-				register_pk_response::Result::SERVER_ERROR
-			}
+		// 	Ok(other) => {
+		// 		log::warn!("Peer {} rejected ({:?})", id, other);
+		// 		register_pk_response::Result::SERVER_ERROR
+		// 	}
 
-			Err(err) => {
-				log::error!("Failed to read status for {}: {}", id, err);
-				register_pk_response::Result::SERVER_ERROR
-			}
-		}
+		// 	Err(err) => {
+		// 		log::error!("Failed to read status for {}: {}", id, err);
+		// 		register_pk_response::Result::SERVER_ERROR
+		// 	}
+		// }
+
+        register_pk_response::Result::OK
+
     }
 
     #[inline]

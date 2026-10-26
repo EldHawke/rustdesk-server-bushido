@@ -442,26 +442,26 @@ impl RendezvousServer {
 
                     if !rp.id.is_empty() {
 
-                        let status = match self.get_client_status(&rp.id).await {
-							Ok(status) => status,
-							Err(_) => return Ok(()),
-						};
+                        // let status = match self.get_client_status(&rp.id).await {
+						// 	Ok(status) => status,
+						// 	Err(_) => return Ok(()),
+						// };
 
-						match status {
-							ClientStatus::Approved => {
-								//log::warn!("{} approved", rp.id);
-							}
+						// match status {
+						// 	ClientStatus::Approved => {
+						// 		//log::warn!("{} approved", rp.id);
+						// 	}
 
-							ClientStatus::Waiting => {
-								//log::warn!("{} waiting approval", rp.id);
-								return Ok(());
-							}
+						// 	ClientStatus::Waiting => {
+						// 		//log::warn!("{} waiting approval", rp.id);
+						// 		return Ok(());
+						// 	}
 							
-							ClientStatus::Blocked => {
-								//log::warn!("{} blocked", rp.id);
-								return Ok(());
-							}
-						}
+						// 	ClientStatus::Blocked => {
+						// 		//log::warn!("{} blocked", rp.id);
+						// 		return Ok(());
+						// 	}
+						// }
 
                         log::trace!("New peer registered: {:?} {:?}", &rp.id, &addr);
                         self.update_addr(rp.id, addr, socket).await?;
@@ -487,15 +487,24 @@ impl RendezvousServer {
                     let id = rk.id;
                     let ip = addr.ip().to_string();
 
-                    let status = match self.get_client_status(&id).await {
-						Ok(status) => status,
-						Err(_) => return Ok(()),
-					};
+                    // let status = match self.get_client_status(&id).await {
+					// 	Ok(status) => status,
+					// 	Err(_) => return Ok(()),
+					// };
 
-                    match status {
-                        ClientStatus::Approved => {}
-                        ClientStatus::Waiting | ClientStatus::Blocked => return Ok(()),
-                    }
+                    // match status {
+                    //     ClientStatus::Approved => {}
+                    //     ClientStatus::Waiting | ClientStatus::Blocked => return Ok(()),
+                    // }
+
+                    // let status = match self.get_client_status(&id).await {
+                    //     Ok(status) => status,
+                    //     Err(_) => return Ok(()),
+                    // };
+
+                    // if status == ClientStatus::Blocked {
+                    //     log::warn!("Blocked peer {} attempted registration", id);
+                    // }
                     
                     if id.len() < 6 {
                         return send_rk_res(socket, addr, UUID_MISMATCH).await;
