@@ -575,12 +575,53 @@ impl RendezvousServer {
                             );
                         }
                     }
+                    // if changed {
+					// 	self.pm.update_pk(id.clone(), peer, addr, rk.uuid, rk.pk, ip).await;
+					// }
+                    // let mut msg_out = RendezvousMessage::new();
+                    // msg_out.set_register_pk_response(RegisterPkResponse {
+                    //     result: register_pk_response::Result::OK.into(),
+                    //     ..Default::default()
+                    // });
+                    // socket.send(&msg_out, addr).await?
+
+                    let mut result = register_pk_response::Result::OK;
+
                     if changed {
-						self.pm.update_pk(id.clone(), peer, addr, rk.uuid, rk.pk, ip).await;
-					}
+                        result = self
+                            .pm
+                            .update_pk(id.clone(), peer, addr, rk.uuid, rk.pk, ip)
+                            .await;
+                    }
+
+                    if result == register_pk_response::Result::OK {
+                        result = match self.pm.db.get_status(&id).await {
+                            Ok(Some(crate::database::STATUS_APPROVED)) => {
+                                log::info!("Peer {} approved", id);
+                                register_pk_response::Result::OK
+                            }
+                            Ok(Some(crate::database::STATUS_WAITING)) => {
+                                log::info!("Peer {} waiting for approval", id);
+                                register_pk_response::Result::SERVER_ERROR
+                            }
+                            Ok(Some(crate::database::STATUS_BLOCKED)) => {
+                                log::warn!("Blocked peer {} attempted registration", id);
+                                register_pk_response::Result::SERVER_ERROR
+                            }
+                            Ok(other) => {
+                                log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
+                                register_pk_response::Result::SERVER_ERROR
+                            }
+                            Err(err) => {
+                                log::error!("Failed to read status for {}: {}", id, err);
+                                register_pk_response::Result::SERVER_ERROR
+                            }
+                        };
+                    }
+
                     let mut msg_out = RendezvousMessage::new();
                     msg_out.set_register_pk_response(RegisterPkResponse {
-                        result: register_pk_response::Result::OK.into(),
+                        result: result.into(),
                         ..Default::default()
                     });
                     socket.send(&msg_out, addr).await?
