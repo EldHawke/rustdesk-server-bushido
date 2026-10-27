@@ -10,7 +10,7 @@ pub async fn start(
     key: &str,
     rmem: usize,
 ) -> ResultType<()> {
-
+    //1 - Start -> go to rendezvous_server.rs -> pub async fn start_with_bind
     RendezvousServer::start_with_bind(
         bind_addr,
         port,

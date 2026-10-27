@@ -119,6 +119,11 @@ enum ClientStatus {
     Blocked,    
 }
 
+//Start sequence
+//(server.rs) - 1 - Start -> go to rendezvous_server.rs -> pub async fn start_with_bind
+//2 - GO TO -> async fn io_loop
+//3 - Go to handle_listener? - figure out which one
+
 impl RendezvousServer {
     /*pub fn start(port: i32, serial: i32, key: &str, rmem: usize) -> ResultType<()> {
         Self::start_with_bind(None, port, serial, key, rmem)
@@ -162,6 +167,7 @@ impl RendezvousServer {
 	}
 
     pub async fn start_with_bind(
+        //2 - GO TO -> async fn io_loop?
         bind_addr: Option<IpAddr>,
         port: i32,
         serial: i32,
@@ -170,9 +176,8 @@ impl RendezvousServer {
     ) -> ResultType<()> {
         let (key, sk) = Self::get_server_sk(key);
         let nat_port = port - 1;
-        let ws_port = port + 2;
+        let ws_port = port + 2;        
         let pm = PeerMap::new().await?;
-
         tokio::spawn({
 			let pm = pm.clone();
 			async move {
@@ -311,6 +316,7 @@ impl RendezvousServer {
     }
 
     async fn io_loop(
+        //3 - Go to handle_listener? - figure out which one
         &mut self,
         rx: &mut Receiver,
         listener: &mut TcpListener,
@@ -362,6 +368,7 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
+                            log::info!("[TRACE] listener=listener2 addr={}", addr);
                             self.handle_listener2(stream, addr).await;
                         }
                         Err(err) => {
@@ -374,6 +381,7 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
+                            log::info!("[TRACE] listener=console addr={}", addr);
                             self.handle_listener2(stream, addr).await;
                         }
                         Err(err) => {
@@ -386,6 +394,7 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
+                            log::info!("[TRACE] listener=websocket addr={}", addr);
                             self.handle_listener(stream, addr, key, true).await;
                         }
                         Err(err) => {
@@ -398,6 +407,7 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr)) => {
                             stream.set_nodelay(true).ok();
+                            log::info!("[TRACE] listener=main_tcp addr={}", addr);
                             self.handle_listener(stream, addr, key, false).await;
                         }
                        Err(err) => {
