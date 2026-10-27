@@ -146,8 +146,30 @@ impl PeerMap {
 		// 	}
 		// }
 
-        register_pk_response::Result::OK
+        //register_pk_response::Result::OK
 
+        match self.db.get_status(&id).await {
+            Ok(Some(crate::database::STATUS_APPROVED)) => {
+                log::info!("Peer {} approved", id);
+                register_pk_response::Result::OK
+            }
+            Ok(Some(crate::database::STATUS_WAITING)) => {
+                log::info!("Peer {} waiting for approval", id);
+                register_pk_response::Result::SERVER_ERROR
+            }
+            Ok(Some(crate::database::STATUS_BLOCKED)) => {
+                log::warn!("Blocked peer {} attempted registration", id);
+                register_pk_response::Result::SERVER_ERROR
+            }
+            Ok(other) => {
+                log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
+                register_pk_response::Result::SERVER_ERROR
+            }
+            Err(err) => {
+                log::error!("Failed to read status for {}: {}", id, err);
+                register_pk_response::Result::SERVER_ERROR
+            }
+        }
     }
 
     #[inline]
