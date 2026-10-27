@@ -602,19 +602,19 @@ impl RendezvousServer {
                             }
                             Ok(Some(crate::database::STATUS_WAITING)) => {
                                 log::info!("Peer {} waiting for approval", id);
-                                register_pk_response::Result::SERVER_ERROR
+                                register_pk_response::Result::NOT_DEPLOYED
                             }
                             Ok(Some(crate::database::STATUS_BLOCKED)) => {
                                 log::warn!("Blocked peer {} attempted registration", id);
-                                register_pk_response::Result::SERVER_ERROR
+                                register_pk_response::Result::NOT_DEPLOYED
                             }
                             Ok(other) => {
                                 log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
-                                register_pk_response::Result::SERVER_ERROR
+                                register_pk_response::Result::NOT_DEPLOYED
                             }
                             Err(err) => {
                                 log::error!("Failed to read status for {}: {}", id, err);
-                                register_pk_response::Result::SERVER_ERROR
+                                register_pk_response::Result::NOT_DEPLOYED
                             }
                         };
                     }
