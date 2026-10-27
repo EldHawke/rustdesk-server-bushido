@@ -491,6 +491,12 @@ async fn make_pair_(
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
             if let Some(rendezvous_message::Union::RequestRelay(rf)) = msg_in.union {
+                log::info!(
+                    "[TRACE] hbbr RequestRelay: addr={}, id='{}', uuid='{}'",
+                    addr,
+                    rf.id,
+                    rf.uuid
+                );
                 if !key.is_empty() && rf.licence_key != key {
                     log::warn!("Relay authentication failed from {} - invalid key", addr);
                     return;
