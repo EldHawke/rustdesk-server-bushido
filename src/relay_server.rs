@@ -410,6 +410,11 @@ async fn handle_connection(
     session_db: sqlx::SqlitePool,
 ) {
     let ip = hbb_common::try_into_v4(addr).ip();
+    log::info!(
+        "[TRACE] hbbr accepted connection: addr={}, ws={}",
+        addr,
+        ws
+    );
     if !ws && ip.is_loopback() {
         let limiter = limiter.clone();
         tokio::spawn(async move {
