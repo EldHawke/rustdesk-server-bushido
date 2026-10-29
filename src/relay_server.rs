@@ -355,9 +355,18 @@ async fn io_loop(
 ) {
     check_params();
     let limiter = <Limiter>::new(TOTAL_BANDWIDTH.load(Ordering::SeqCst) as _);
+    log::info!(
+        "[CUSTOM] (5.0) relay_server.rs - accept loop starting"
+    );
     loop {
+        log::info!(
+            "[CUSTOM] (5.0.1) relay_server.rs - waiting on listener accepts"
+        );
 		tokio::select! {
 			res = listener.accept() => {
+                log::info!(
+                    "[CUSTOM] (5.0.2) relay_server.rs - listener.accept completed"
+                );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
@@ -377,6 +386,9 @@ async fn io_loop(
 				}
 			}
 			res = listener2.accept() => {
+                log::info!(
+                    "[CUSTOM] (5.0.3) relay_server.rs - listener2.accept completed"
+                );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
@@ -396,6 +408,9 @@ async fn io_loop(
 				}
 			}
 			res = crate::common::accept_or_pending(listener_console.as_ref()) => {
+                log::info!(
+                    "[CUSTOM] (5.0.4) relay_server.rs - listener_console accept completed"
+                );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
