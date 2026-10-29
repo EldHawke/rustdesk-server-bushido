@@ -10,6 +10,14 @@ pub async fn start(
     key: &str,
     rmem: usize,
 ) -> ResultType<()> {
+
+    log::info!(
+        "[CUSTOM] (1) server.rs - pub async fn start -> bind_addr={:?}, port={}, rmem={}",
+        bind_addr,
+        port,
+        rmem
+    );
+
     //1 - Start -> go to rendezvous_server.rs -> pub async fn start_with_bind
     RendezvousServer::start_with_bind(
         bind_addr,

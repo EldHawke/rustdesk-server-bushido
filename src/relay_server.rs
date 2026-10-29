@@ -90,6 +90,11 @@ pub async fn start_with_bind(
         BLOCKLIST.read().await.len()
     );
     let port: u16 = port.parse()?;
+    log::info!(
+        "[CUSTOM] (5.1) relay_server.rs - start_with_bind -> bind_addr={:?}, port={}",
+        bind_addr,
+        port
+    );
     log::info!("Listening on tcp :{}", port);
     let port2 = port + 2;
     log::info!("Listening on websocket :{}", port2);
@@ -411,7 +416,7 @@ async fn handle_connection(
 ) {
     let ip = hbb_common::try_into_v4(addr).ip();
     log::info!(
-        "[TRACE] hbbr accepted connection: addr={}, ws={}",
+        "[CUSTOM] (5.2) relay_server.rs - handle_connection -> connection accepted, addr={}, ws={}",
         addr,
         ws
     );
@@ -430,6 +435,10 @@ async fn handle_connection(
         return;
     }
     let ip = ip.to_string();
+    log::info!(
+        "[CUSTOM] (5.3) relay_server.rs - handle_connection -> checking IP blocklist, ip={}",
+        ip
+    );
     if BLOCKLIST.read().await.get(&ip).is_some() {
         log::info!("{} blocked", ip);
         return;
@@ -451,6 +460,11 @@ async fn make_pair(
     ws: bool,
     session_db: sqlx::SqlitePool,
 ) -> ResultType<()> {
+    log::info!(
+        "[CUSTOM] (6.1) relay_server.rs - make_pair -> starting protocol handshake, addr={}, ws={}",
+        addr,
+        ws
+    );
     if ws {
         use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
         let callback = |req: &Request, response: Response| {
@@ -494,10 +508,19 @@ async fn make_pair_(
 ) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
+        log::info!(
+            "[CUSTOM] (6.2) relay_server.rs - make_pair_ -> first message received, addr={}, bytes={}",
+            addr,
+            bytes.len()
+        );
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
+            log::info!(
+                "[CUSTOM] (6.3) relay_server.rs - make_pair_ -> RendezvousMessage parsed, addr={}",
+                addr
+            );
             if let Some(rendezvous_message::Union::RequestRelay(rf)) = msg_in.union {
                 log::info!(
-                    "[TRACE] hbbr RequestRelay: addr={}, id='{}', uuid='{}'",
+                    "[CUSTOM] (6.4) relay_server.rs - make_pair_ -> RequestRelay received, addr={}, id='{}', uuid='{}'",
                     addr,
                     rf.id,
                     rf.uuid
