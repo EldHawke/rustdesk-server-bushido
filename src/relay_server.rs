@@ -361,6 +361,10 @@ async fn io_loop(
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
+                        log::info!(
+                            "[CUSTOM] (5.1) relay_server.rs - listener.accept -> accepted addr={}",
+                            addr
+                        );
 						handle_connection(
 							stream, addr, &limiter, key, false,
 							session_db.clone(),
@@ -376,6 +380,10 @@ async fn io_loop(
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
+                        log::info!(
+                            "[CUSTOM] (5.2) relay_server.rs - listener2.accept -> accepted addr={}",
+                            addr
+                        );
 						handle_connection(
 							stream, addr, &limiter, key, true,
 							session_db.clone(),
@@ -391,6 +399,10 @@ async fn io_loop(
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
+                        log::info!(
+                            "[CUSTOM] (5.3) relay_server.rs - listener_console.accept -> accepted addr={}",
+                            addr
+                        );
 						handle_connection(
 							stream, addr, &limiter, key, false,
 							session_db.clone(),
