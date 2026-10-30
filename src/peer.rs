@@ -148,28 +148,78 @@ impl PeerMap {
 
         //register_pk_response::Result::OK
 
-        match self.db.get_status(&id).await {
-            Ok(Some(crate::database::STATUS_APPROVED)) => {
-                log::info!("Peer {} approved", id);
+        // match self.db.get_status(&id).await {
+        //     Ok(Some(crate::database::STATUS_APPROVED)) => {
+        //         log::info!("Peer {} approved", id);
+        //         register_pk_response::Result::OK
+        //     }
+        //     Ok(Some(crate::database::STATUS_WAITING)) => {
+        //         log::info!("Peer {} waiting for approval", id);
+        //         register_pk_response::Result::SERVER_ERROR
+        //     }
+        //     Ok(Some(crate::database::STATUS_BLOCKED)) => {
+        //         log::warn!("Blocked peer {} attempted registration", id);
+        //         register_pk_response::Result::SERVER_ERROR
+        //     }
+        //     Ok(other) => {
+        //         log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
+        //         register_pk_response::Result::SERVER_ERROR
+        //     }
+        //     Err(err) => {
+        //         log::error!("Failed to read status for {}: {}", id, err);
+        //         register_pk_response::Result::SERVER_ERROR
+        //     }
+        // }
+
+                let approved = match self.db.get_status(&id).await {
+                    Ok(Some(crate::database::STATUS_APPROVED)) => {
+                        log::info!("Peer {} approved", id);
+                        true
+                    }
+                    Ok(other) => {
+                        log::warn!("Peer {} rejected: status {:?}", id, other);
+                        false
+                    }
+                    Err(err) => {
+                        log::error!("Failed to read status for {}: {}", id, err);
+                        false
+                    }
+                };
+
+                if !approved {
+                    // 3. Remove this peer from the in-memory map.
+                    {
+                        let mut peers = self.map.write().await;
+
+                        if let Some(existing) = peers.get(&id) {
+                            if std::sync::Arc::ptr_eq(existing, &peer) {
+                                peers.remove(&id);
+                            }
+                        }
+                    }
+
+                    // 4. Clear its in-memory registration details.
+                    {
+                        let mut p = peer.write().await;
+
+                        p.socket_addr = "0.0.0.0:0".parse().unwrap();
+                        p.last_reg_time = get_expired_time();
+                        p.uuid = Bytes::new();
+                        p.pk = Bytes::new();
+                        p.status = None;
+                        p.info.ip.clear();
+                        p.reg_pk = (0, get_expired_time());
+                    }
+
+                    log::warn!("Peer {} removed from active registration", id);
+
+                    // 5. Reject registration.
+                    return register_pk_response::Result::SERVER_ERROR;
+                }
+
                 register_pk_response::Result::OK
-            }
-            Ok(Some(crate::database::STATUS_WAITING)) => {
-                log::info!("Peer {} waiting for approval", id);
-                register_pk_response::Result::SERVER_ERROR
-            }
-            Ok(Some(crate::database::STATUS_BLOCKED)) => {
-                log::warn!("Blocked peer {} attempted registration", id);
-                register_pk_response::Result::SERVER_ERROR
-            }
-            Ok(other) => {
-                log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
-                register_pk_response::Result::SERVER_ERROR
-            }
-            Err(err) => {
-                log::error!("Failed to read status for {}: {}", id, err);
-                register_pk_response::Result::SERVER_ERROR
-            }
-        }
+
+
     }
 
     #[inline]
