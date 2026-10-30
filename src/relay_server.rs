@@ -28,6 +28,13 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use sqlx::{
+    sqlite::SqliteConnectOptions,
+    Connection,
+    SqliteConnection,
+};
+use std::str::FromStr;
+
 type Usage = (usize, usize, usize, usize);
 
 struct PendingRelay {
@@ -560,6 +567,79 @@ async fn make_pair_(
                     let mut peer = PEERS.lock().await.remove(&rf.uuid);
                     if let Some(peer) = peer.as_mut() {
                         log::info!("Relayrequest {} from {} got paired", rf.uuid, addr);
+
+                        // [CUSTOM] Native RustDesk peer-status admission gate.
+
+                        // First connection is the originator.
+                        // If its ID is blank, use the second connection's ID.
+                        let originator_id = if !peer.claimed_id.is_empty() {
+                            peer.claimed_id.as_str()
+                        } else {
+                            rf.id.as_str()
+                        };
+
+                        if originator_id.is_empty() {
+                            log::warn!(
+                                "[RELAY GATE] Rejected {}: originator ID is empty",
+                                rf.uuid
+                            );
+                            return;
+                        }
+
+                        // Open the native RustDesk peer database.
+                        let db_url = std::env::var("DB_URL")
+                            .unwrap_or_else(|_| "./db_v2.sqlite3".to_owned());
+
+                        let db_options = match SqliteConnectOptions::from_str(&db_url) {
+                            Ok(options) => options,
+                            Err(err) => {
+                                log::error!("[RELAY GATE] Invalid database configuration: {}", err);
+                                return;
+                            }
+                        };
+
+                        let mut peer_db = match SqliteConnection::connect_with(&db_options).await {
+                            Ok(conn) => conn,
+                            Err(err) => {
+                                log::error!("[RELAY GATE] Database connection failed: {}", err);
+                                return;
+                            }
+                        };
+
+                        // Only status 1 is permitted.
+                        let status = sqlx::query_scalar::<_, Option<i64>>(
+                            "SELECT status FROM peer WHERE id = ?"
+                        )
+                        .bind(originator_id)
+                        .fetch_optional(&mut peer_db)
+                        .await;
+
+                        match status {
+                            Ok(Some(Some(1))) => {
+                                log::info!(
+                                    "[RELAY GATE] APPROVED originator={} uuid={}",
+                                    originator_id,
+                                    rf.uuid
+                                );
+                            }
+                            Ok(other) => {
+                                log::warn!(
+                                    "[RELAY GATE] REJECTED originator={} status={:?} uuid={}",
+                                    originator_id,
+                                    other,
+                                    rf.uuid
+                                );
+                                return;
+                            }
+                            Err(err) => {
+                                log::error!(
+                                    "[RELAY GATE] Database query failed for {}: {}",
+                                    originator_id,
+                                    err
+                                );
+                                return;
+                            }
+                        }
 
 
                         //Original logging for relay connections
