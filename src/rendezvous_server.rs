@@ -645,7 +645,9 @@ impl RendezvousServer {
                             }
                         };
                     }
+                    
 
+                    //WORKING LOGIC GATE TO VISUALLY SAY "Not Ready" FOR RELAY - THIS DOES NOT FIREWALL GATE THE CLIENT
                     if result != register_pk_response::Result::OK {
                         log::warn!(
                             "Rejecting registration lifecycle for peer {}: {:?}",
@@ -931,6 +933,40 @@ impl RendezvousServer {
 
         let requester_id = ph.requester_id.clone();
         let target_id = ph.id.clone();
+
+        // Reject connection attempts from unapproved originators.
+        match self.pm.db.get_status(&requester_id).await {
+            Ok(Some(1)) => {
+                log::info!("Requester {} approved", requester_id);
+            }
+            Ok(Some(status)) => {
+                log::warn!(
+                    "Requester {} rejected: status={}",
+                    requester_id,
+                    status
+                );
+
+                let mut msg_out = RendezvousMessage::new();
+                msg_out.set_punch_hole_response(PunchHoleResponse {
+                    failure: punch_hole_response::Failure::OFFLINE.into(),
+                    ..Default::default()
+                });
+
+                return Ok((msg_out, None));
+            }
+            Ok(None) => {
+                log::warn!("Requester {} has no database record", requester_id);
+                return Ok((RendezvousMessage::new(), None));
+            }
+            Err(err) => {
+                log::error!(
+                    "Requester status lookup failed for {}: {}",
+                    requester_id,
+                    err
+                );
+                return Ok((RendezvousMessage::new(), None));
+            }
+        }
 
         let allowed = if requester_id == TEST_A_ID && target_id == TEST_B_ID {
             ALLOW_A_TO_B
