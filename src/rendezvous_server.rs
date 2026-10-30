@@ -646,6 +646,15 @@ impl RendezvousServer {
                         };
                     }
 
+                    if result != register_pk_response::Result::OK {
+                        log::warn!(
+                            "Rejecting registration lifecycle for peer {}: {:?}",
+                            id,
+                            result
+                        );
+                        return Ok(());
+                    }
+
                     let mut msg_out = RendezvousMessage::new();
                     msg_out.set_register_pk_response(RegisterPkResponse {
                         result: result.into(),
