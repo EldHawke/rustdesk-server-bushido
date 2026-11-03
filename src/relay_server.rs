@@ -97,11 +97,11 @@ pub async fn start_with_bind(
         BLOCKLIST.read().await.len()
     );
     let port: u16 = port.parse()?;
-    log::info!(
-        "[CUSTOM] (5.1) relay_server.rs - start_with_bind -> bind_addr={:?}, port={}",
-        bind_addr,
-        port
-    );
+    // log::info!(
+    //     "[CUSTOM] (5.1) relay_server.rs - start_with_bind -> bind_addr={:?}, port={}",
+    //     bind_addr,
+    //     port
+    // );
     log::info!("Listening on tcp :{}", port);
     let port2 = port + 2;
     log::info!("Listening on websocket :{}", port2);
@@ -362,25 +362,25 @@ async fn io_loop(
 ) {
     check_params();
     let limiter = <Limiter>::new(TOTAL_BANDWIDTH.load(Ordering::SeqCst) as _);
-    log::info!(
-        "[CUSTOM] (5.0) relay_server.rs - accept loop starting"
-    );
+    // log::info!(
+    //     "[CUSTOM] (5.0) relay_server.rs - accept loop starting"
+    // );
     loop {
-        log::info!(
-            "[CUSTOM] (5.0.1) relay_server.rs - waiting on listener accepts"
-        );
+        // log::info!(
+        //     "[CUSTOM] (5.0.1) relay_server.rs - waiting on listener accepts"
+        // );
 		tokio::select! {
 			res = listener.accept() => {
-                log::info!(
-                    "[CUSTOM] (5.0.2) relay_server.rs - listener.accept completed"
-                );
+                // log::info!(
+                //     "[CUSTOM] (5.0.2) relay_server.rs - listener.accept completed"
+                // );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
-                        log::info!(
-                            "[CUSTOM] (5.1) relay_server.rs - listener.accept -> accepted addr={}",
-                            addr
-                        );
+                        // log::info!(
+                        //     "[CUSTOM] (5.1) relay_server.rs - listener.accept -> accepted addr={}",
+                        //     addr
+                        // );
 						handle_connection(
 							stream, addr, &limiter, key, false,
 							session_db.clone(),
@@ -393,16 +393,16 @@ async fn io_loop(
 				}
 			}
 			res = listener2.accept() => {
-                log::info!(
-                    "[CUSTOM] (5.0.3) relay_server.rs - listener2.accept completed"
-                );
+                // log::info!(
+                //     "[CUSTOM] (5.0.3) relay_server.rs - listener2.accept completed"
+                // );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
-                        log::info!(
-                            "[CUSTOM] (5.2) relay_server.rs - listener2.accept -> accepted addr={}",
-                            addr
-                        );
+                        // log::info!(
+                        //     "[CUSTOM] (5.2) relay_server.rs - listener2.accept -> accepted addr={}",
+                        //     addr
+                        // );
 						handle_connection(
 							stream, addr, &limiter, key, true,
 							session_db.clone(),
@@ -415,16 +415,16 @@ async fn io_loop(
 				}
 			}
 			res = crate::common::accept_or_pending(listener_console.as_ref()) => {
-                log::info!(
-                    "[CUSTOM] (5.0.4) relay_server.rs - listener_console accept completed"
-                );
+                // log::info!(
+                //     "[CUSTOM] (5.0.4) relay_server.rs - listener_console accept completed"
+                // );
 				match res {
 					Ok((stream, addr)) => {
 						stream.set_nodelay(true).ok();
-                        log::info!(
-                            "[CUSTOM] (5.3) relay_server.rs - listener_console.accept -> accepted addr={}",
-                            addr
-                        );
+                        // log::info!(
+                        //     "[CUSTOM] (5.3) relay_server.rs - listener_console.accept -> accepted addr={}",
+                        //     addr
+                        // );
 						handle_connection(
 							stream, addr, &limiter, key, false,
 							session_db.clone(),
@@ -449,11 +449,11 @@ async fn handle_connection(
     session_db: sqlx::SqlitePool,
 ) {
     let ip = hbb_common::try_into_v4(addr).ip();
-    log::info!(
-        "[CUSTOM] (5.2) relay_server.rs - handle_connection -> connection accepted, addr={}, ws={}",
-        addr,
-        ws
-    );
+    // log::info!(
+    //     "[CUSTOM] (5.2) relay_server.rs - handle_connection -> connection accepted, addr={}, ws={}",
+    //     addr,
+    //     ws
+    // );
     if !ws && ip.is_loopback() {
         let limiter = limiter.clone();
         tokio::spawn(async move {
@@ -469,10 +469,10 @@ async fn handle_connection(
         return;
     }
     let ip = ip.to_string();
-    log::info!(
-        "[CUSTOM] (5.3) relay_server.rs - handle_connection -> checking IP blocklist, ip={}",
-        ip
-    );
+    // log::info!(
+    //     "[CUSTOM] (5.3) relay_server.rs - handle_connection -> checking IP blocklist, ip={}",
+    //     ip
+    // );
     if BLOCKLIST.read().await.get(&ip).is_some() {
         log::info!("{} blocked", ip);
         return;
@@ -494,11 +494,11 @@ async fn make_pair(
     ws: bool,
     session_db: sqlx::SqlitePool,
 ) -> ResultType<()> {
-    log::info!(
-        "[CUSTOM] (6.1) relay_server.rs - make_pair -> starting protocol handshake, addr={}, ws={}",
-        addr,
-        ws
-    );
+    // log::info!(
+    //     "[CUSTOM] (6.1) relay_server.rs - make_pair -> starting protocol handshake, addr={}, ws={}",
+    //     addr,
+    //     ws
+    // );
     if ws {
         use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
         let callback = |req: &Request, response: Response| {
@@ -542,23 +542,23 @@ async fn make_pair_(
 ) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
-        log::info!(
-            "[CUSTOM] (6.2) relay_server.rs - make_pair_ -> first message received, addr={}, bytes={}",
-            addr,
-            bytes.len()
-        );
+        // log::info!(
+        //     "[CUSTOM] (6.2) relay_server.rs - make_pair_ -> first message received, addr={}, bytes={}",
+        //     addr,
+        //     bytes.len()
+        // );
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
-            log::info!(
-                "[CUSTOM] (6.3) relay_server.rs - make_pair_ -> RendezvousMessage parsed, addr={}",
-                addr
-            );
+            // log::info!(
+            //     "[CUSTOM] (6.3) relay_server.rs - make_pair_ -> RendezvousMessage parsed, addr={}",
+            //     addr
+            // );
             if let Some(rendezvous_message::Union::RequestRelay(rf)) = msg_in.union {
-                log::info!(
-                    "[CUSTOM] (6.4) relay_server.rs - make_pair_ -> RequestRelay received, addr={}, id='{}', uuid='{}'",
-                    addr,
-                    rf.id,
-                    rf.uuid
-                );
+                // log::info!(
+                //     "[CUSTOM] (6.4) relay_server.rs - make_pair_ -> RequestRelay received, addr={}, id='{}', uuid='{}'",
+                //     addr,
+                //     rf.id,
+                //     rf.uuid
+                // );
                 if !key.is_empty() && rf.licence_key != key {
                     log::warn!("Relay authentication failed from {} - invalid key", addr);
                     return;

@@ -276,9 +276,9 @@ impl RendezvousServer {
             });
         };
 
-        log::info!(
-            "[CUSTOM] (2) rendezvous_server.rs - start_with_bind -> initialization complete, entering io_loop"
-        );
+        // log::info!(
+        //     "[CUSTOM] (2) rendezvous_server.rs - start_with_bind -> initialization complete, entering io_loop"
+        // );
 
         let main_task = async move {
             loop {
@@ -378,10 +378,10 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
-                            log::info!(
-                                "[CUSTOM] (3.1) rendezvous_server.rs - io_loop -> NAT TCP connection accepted, addr={}",
-                                addr
-                            );
+                            // log::info!(
+                            //     "[CUSTOM] (3.1) rendezvous_server.rs - io_loop -> NAT TCP connection accepted, addr={}",
+                            //     addr
+                            // );
                             self.handle_listener2(stream, addr).await;
                         }
                         Err(err) => {
@@ -394,10 +394,10 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
-                            log::info!(
-                                "[CUSTOM] (3.2) rendezvous_server.rs - io_loop -> console connection accepted, addr={}",
-                                addr
-                            );
+                            // log::info!(
+                            //     "[CUSTOM] (3.2) rendezvous_server.rs - io_loop -> console connection accepted, addr={}",
+                            //     addr
+                            // );
                             self.handle_listener2(stream, addr).await;
                         }
                         Err(err) => {
@@ -410,10 +410,10 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr))  => {
                             stream.set_nodelay(true).ok();
-                            log::info!(
-                                "[CUSTOM] (3.3) rendezvous_server.rs - io_loop -> WebSocket connection accepted, addr={}",
-                                addr
-                            );
+                            // log::info!(
+                            //     "[CUSTOM] (3.3) rendezvous_server.rs - io_loop -> WebSocket connection accepted, addr={}",
+                            //     addr
+                            // );
                             self.handle_listener(stream, addr, key, true).await;
                         }
                         Err(err) => {
@@ -426,10 +426,10 @@ impl RendezvousServer {
                     match res {
                         Ok((stream, addr)) => {
                             stream.set_nodelay(true).ok();
-                            log::info!(
-                                "[CUSTOM] (3.4) rendezvous_server.rs - io_loop -> main TCP connection accepted, addr={}",
-                                addr
-                            );
+                            // log::info!(
+                            //     "[CUSTOM] (3.4) rendezvous_server.rs - io_loop -> main TCP connection accepted, addr={}",
+                            //     addr
+                            // );
                             self.handle_listener(stream, addr, key, false).await;
                         }
                        Err(err) => {
@@ -1553,12 +1553,12 @@ impl RendezvousServer {
     ) -> ResultType<()> {
         let mut sink;        
         let connection_id = TCP_CONNECTION_ID.fetch_add(1, Ordering::Relaxed) as u64;
-        log::info!(
-            "[CUSTOM] (4.1) rendezvous_server.rs - handle_listener_inner -> connection_id={}, addr={}, ws={}",
-            connection_id,
-            addr,
-            ws
-        );        
+        // log::info!(
+        //     "[CUSTOM] (4.1) rendezvous_server.rs - handle_listener_inner -> connection_id={}, addr={}, ws={}",
+        //     connection_id,
+        //     addr,
+        //     ws
+        // );        
         if ws {
             use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
             let callback = |req: &Request, response: Response| {
@@ -1614,12 +1614,12 @@ impl RendezvousServer {
 						}
 					}
 
-                    log::info!(
-                        "[CUSTOM] (4.2) rendezvous_server.rs - handle_listener_inner -> WebSocket binary message received, connection_id={}, addr={}, bytes={}",
-                        connection_id,
-                        addr,
-                        bytes.len()
-                    );
+                    // log::info!(
+                    //     "[CUSTOM] (4.2) rendezvous_server.rs - handle_listener_inner -> WebSocket binary message received, connection_id={}, addr={}, bytes={}",
+                    //     connection_id,
+                    //     addr,
+                    //     bytes.len()
+                    // );
 
                     if !self.handle_tcp(&bytes, &mut sink, addr, key, ws, connection_id).await {
                         break;
@@ -1651,12 +1651,12 @@ impl RendezvousServer {
 					state.messages += 1;
 				}
 
-                log::info!(
-                    "[CUSTOM] (4.2) rendezvous_server.rs - handle_listener_inner -> TCP message received, connection_id={}, addr={}, bytes={}",
-                    connection_id,
-                    addr,
-                    bytes.len()
-                );
+                // log::info!(
+                //     "[CUSTOM] (4.2) rendezvous_server.rs - handle_listener_inner -> TCP message received, connection_id={}, addr={}, bytes={}",
+                //     connection_id,
+                //     addr,
+                //     bytes.len()
+                // );
 
                 if !self.handle_tcp(&bytes, &mut sink, addr, key, ws, connection_id).await {
                     break;
