@@ -1755,7 +1755,7 @@ impl RendezvousServer {
 
     async fn check_external_access(&self, source: &str, target: &str) -> bool {
         let response = self.access_api_client
-            .post("http://127.0.0.1:32100/access/check")
+            .post("http://172.18.0.1:32100/access/check")
             .json(&serde_json::json!({
                 "source": source,
                 "target": target
