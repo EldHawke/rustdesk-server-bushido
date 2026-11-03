@@ -102,6 +102,7 @@ pub struct RendezvousServer {
     relay_servers0: Arc<RelayServers>,
     rendezvous_servers: Arc<Vec<String>>,
     inner: Arc<Inner>,
+    access_api_client: reqwest::Client,
 }
 
 enum LoopFailure {
@@ -205,7 +206,11 @@ impl RendezvousServer {
                     .unwrap_or_default(),
             )
         };
+        let access_api_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()?;
         let mut rs = Self {
+            access_api_client,
             tcp_punch: Arc::new(Mutex::new(HashMap::new())),
             tcp_connections: Arc::new(Mutex::new(HashMap::new())),
             pm,
@@ -220,7 +225,7 @@ impl RendezvousServer {
                 sk,
                 mask,
                 local_ip,
-            }),
+            }),            
         };
         log::info!("mask: {:?}", rs.inner.mask);
         log::info!("local-ip: {:?}", rs.inner.local_ip);
@@ -648,6 +653,7 @@ impl RendezvousServer {
                     
 
                     //WORKING LOGIC GATE TO VISUALLY SAY "Not Ready" FOR RELAY - THIS DOES NOT FIREWALL GATE THE CLIENT
+                    //RELAY BLOCK LOGIC GATE
                     if result != register_pk_response::Result::OK {
                         log::warn!(
                             "Rejecting registration lifecycle for peer {}: {:?}",
@@ -922,14 +928,86 @@ impl RendezvousServer {
         connection_id: Option<u64>,
     ) -> ResultType<(RendezvousMessage, Option<SocketAddr>)> {
         let mut ph = ph;
+        //FIREWALL LOGIC GATE        
+        // const TEST_A_ID: &str = "1753910904";
+        // const TEST_B_ID: &str = "169157096";
 
-        // Temporary ID-to-ID firewall test rules.
-        // Each direction is authorized independently.
-        const TEST_A_ID: &str = "1753910904";
-        const TEST_B_ID: &str = "169157096";
+        // const ALLOW_A_TO_B: bool = true;
+        // const ALLOW_B_TO_A: bool = false;
 
-        const ALLOW_A_TO_B: bool = true;
-        const ALLOW_B_TO_A: bool = false;
+        // let requester_id = ph.requester_id.clone();
+        // let target_id = ph.id.clone();
+
+        // // Reject connection attempts from unapproved originators.
+        // match self.pm.db.get_status(&requester_id).await {
+        //     Ok(Some(1)) => {
+        //         log::info!("Requester {} approved", requester_id);
+        //     }
+        //     Ok(Some(status)) => {
+        //         log::warn!(
+        //             "Requester {} rejected: status={}",
+        //             requester_id,
+        //             status
+        //         );
+
+        //         let mut msg_out = RendezvousMessage::new();
+        //         msg_out.set_punch_hole_response(PunchHoleResponse {
+        //             failure: punch_hole_response::Failure::OFFLINE.into(),
+        //             ..Default::default()
+        //         });
+
+        //         return Ok((msg_out, None));
+        //     }
+        //     Ok(None) => {
+        //         log::warn!("Requester {} has no database record", requester_id);
+        //         return Ok((RendezvousMessage::new(), None));
+        //     }
+        //     Err(err) => {
+        //         log::error!(
+        //             "Requester status lookup failed for {}: {}",
+        //             requester_id,
+        //             err
+        //         );
+        //         return Ok((RendezvousMessage::new(), None));
+        //     }
+        // }
+
+        // let allowed = if requester_id == TEST_A_ID && target_id == TEST_B_ID {
+        //     ALLOW_A_TO_B
+        // } else if requester_id == TEST_B_ID && target_id == TEST_A_ID {
+        //     ALLOW_B_TO_A
+        // } else {
+        //     false
+        // };
+
+        // if !allowed {
+        //     log::warn!(
+        //         "ID_FIREWALL: DENIED requester_id={} target_id={}",
+        //         requester_id,
+        //         target_id
+        //     );
+
+        //     let mut msg_out = RendezvousMessage::new();
+        //     msg_out.set_punch_hole_response(PunchHoleResponse {
+        //         failure: punch_hole_response::Failure::OFFLINE.into(),
+        //         ..Default::default()
+        //     });
+
+        //     return Ok((msg_out, None));
+        // }
+
+        // log::info!(
+        //     "ID_FIREWALL: ALLOWED requester_id={} target_id={}",
+        //     requester_id,
+        //     target_id
+        // );
+
+        // let requester_id = ph.requester_id.clone();
+		// log::info!(
+		// 	"PUNCH_HOLE_REQUEST: requester_id={} target_id={}",
+		// 	requester_id,
+		// 	ph.id
+		// );
 
         let requester_id = ph.requester_id.clone();
         let target_id = ph.id.clone();
@@ -940,11 +1018,7 @@ impl RendezvousServer {
                 log::info!("Requester {} approved", requester_id);
             }
             Ok(Some(status)) => {
-                log::warn!(
-                    "Requester {} rejected: status={}",
-                    requester_id,
-                    status
-                );
+                log::warn!("Requester {} rejected: status={}", requester_id, status);
 
                 let mut msg_out = RendezvousMessage::new();
                 msg_out.set_punch_hole_response(PunchHoleResponse {
@@ -959,24 +1033,13 @@ impl RendezvousServer {
                 return Ok((RendezvousMessage::new(), None));
             }
             Err(err) => {
-                log::error!(
-                    "Requester status lookup failed for {}: {}",
-                    requester_id,
-                    err
-                );
+                log::error!("Requester status lookup failed for {}: {}", requester_id, err);
                 return Ok((RendezvousMessage::new(), None));
             }
         }
 
-        let allowed = if requester_id == TEST_A_ID && target_id == TEST_B_ID {
-            ALLOW_A_TO_B
-        } else if requester_id == TEST_B_ID && target_id == TEST_A_ID {
-            ALLOW_B_TO_A
-        } else {
-            false
-        };
-
-        if !allowed {
+        // Check directional access through RustDesk Manager.
+        if !self.check_external_access(&requester_id, &target_id).await {
             log::warn!(
                 "ID_FIREWALL: DENIED requester_id={} target_id={}",
                 requester_id,
@@ -997,13 +1060,6 @@ impl RendezvousServer {
             requester_id,
             target_id
         );
-
-        let requester_id = ph.requester_id.clone();
-		log::info!(
-			"PUNCH_HOLE_REQUEST: requester_id={} target_id={}",
-			requester_id,
-			ph.id
-		);
 
         if let Some(connection_id) = connection_id {
             if let Some(state) = self.tcp_connections.lock().await.get_mut(&try_into_v4(addr)) {
@@ -1696,6 +1752,38 @@ impl RendezvousServer {
         }
         false
     }
+
+    async fn check_external_access(&self, source: &str, target: &str) -> bool {
+        let response = self.access_api_client
+            .post("http://127.0.0.1:32100/access/check")
+            .json(&serde_json::json!({
+                "source": source,
+                "target": target
+            }))
+            .send()
+            .await;
+
+        match response {
+            Ok(response) if response.status().is_success() => {
+                match response.json::<serde_json::Value>().await {
+                    Ok(body) => body["allowed"].as_bool() == Some(true),
+                    Err(err) => {
+                        log::error!("Access API response parsing failed: {}", err);
+                        false
+                    }
+                }
+            }
+            Ok(response) => {
+                log::warn!("Access API returned HTTP {}", response.status());
+                false
+            }
+            Err(err) => {
+                log::error!("Access API request failed: {}", err);
+                false
+            }
+        }
+    }
+
 }
 
 async fn check_relay_servers(rs0: Arc<RelayServers>, tx: Sender) {
