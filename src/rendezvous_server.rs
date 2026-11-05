@@ -474,27 +474,6 @@ impl RendezvousServer {
 
                     if !rp.id.is_empty() {
 
-                        // let status = match self.get_client_status(&rp.id).await {
-						// 	Ok(status) => status,
-						// 	Err(_) => return Ok(()),
-						// };
-
-						// match status {
-						// 	ClientStatus::Approved => {
-						// 		//log::warn!("{} approved", rp.id);
-						// 	}
-
-						// 	ClientStatus::Waiting => {
-						// 		//log::warn!("{} waiting approval", rp.id);
-						// 		return Ok(());
-						// 	}
-							
-						// 	ClientStatus::Blocked => {
-						// 		//log::warn!("{} blocked", rp.id);
-						// 		return Ok(());
-						// 	}
-						// }
-
                         log::trace!("New peer registered: {:?} {:?}", &rp.id, &addr);
                         self.update_addr(rp.id, addr, socket).await?;
                         if self.inner.serial > rp.serial {
@@ -518,25 +497,6 @@ impl RendezvousServer {
                     }
                     let id = rk.id;
                     let ip = addr.ip().to_string();
-
-                    // let status = match self.get_client_status(&id).await {
-					// 	Ok(status) => status,
-					// 	Err(_) => return Ok(()),
-					// };
-
-                    // match status {
-                    //     ClientStatus::Approved => {}
-                    //     ClientStatus::Waiting | ClientStatus::Blocked => return Ok(()),
-                    // }
-
-                    // let status = match self.get_client_status(&id).await {
-                    //     Ok(status) => status,
-                    //     Err(_) => return Ok(()),
-                    // };
-
-                    // if status == ClientStatus::Blocked {
-                    //     log::warn!("Blocked peer {} attempted registration", id);
-                    // }
                     
                     if id.len() < 6 {
                         return send_rk_res(socket, addr, UUID_MISMATCH).await;
@@ -626,31 +586,49 @@ impl RendezvousServer {
                             .await;
                     }
 
+                    // if result == register_pk_response::Result::OK {
+                    //     result = match self.pm.db.get_status(&id).await {
+                    //         Ok(Some(crate::database::STATUS_APPROVED)) => {
+                    //             log::info!("Peer {} approved", id);
+                    //             register_pk_response::Result::OK
+                    //         }
+                    //         Ok(Some(crate::database::STATUS_WAITING)) => {
+                    //             log::info!("Peer {} waiting for approval", id);
+                    //             register_pk_response::Result::NOT_DEPLOYED
+                    //         }
+                    //         Ok(Some(crate::database::STATUS_BLOCKED)) => {
+                    //             log::warn!("Blocked peer {} attempted registration", id);
+                    //             register_pk_response::Result::NOT_DEPLOYED
+                    //         }
+                    //         Ok(other) => {
+                    //             log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
+                    //             register_pk_response::Result::NOT_DEPLOYED
+                    //         }
+                    //         Err(err) => {
+                    //             log::error!("Failed to read status for {}: {}", id, err);
+                    //             register_pk_response::Result::NOT_DEPLOYED
+                    //         }
+                    //     };
+                    // }
+                    
                     if result == register_pk_response::Result::OK {
-                        result = match self.pm.db.get_status(&id).await {
+                        match self.pm.db.get_status(&id).await {
                             Ok(Some(crate::database::STATUS_APPROVED)) => {
-                                log::info!("Peer {} approved", id);
-                                register_pk_response::Result::OK
+                                log::info!("Relay gate: Peer {} approved", id);
                             }
-                            Ok(Some(crate::database::STATUS_WAITING)) => {
-                                log::info!("Peer {} waiting for approval", id);
-                                register_pk_response::Result::NOT_DEPLOYED
+                            Ok(Some(status)) => {
+                                log::warn!("Relay gate: Peer {} rejected, status: {}", id, status);
+                                return Ok(());
                             }
-                            Ok(Some(crate::database::STATUS_BLOCKED)) => {
-                                log::warn!("Blocked peer {} attempted registration", id);
-                                register_pk_response::Result::NOT_DEPLOYED
-                            }
-                            Ok(other) => {
-                                log::warn!("Peer {} has unknown or missing status: {:?}", id, other);
-                                register_pk_response::Result::NOT_DEPLOYED
+                            Ok(None) => {
+                                log::info!("Relay gate: New peer {}, allowing registration", id);
                             }
                             Err(err) => {
-                                log::error!("Failed to read status for {}: {}", id, err);
-                                register_pk_response::Result::NOT_DEPLOYED
+                                log::error!("Relay gate: Database error for {}: {}", id, err);
+                                return Ok(());
                             }
-                        };
+                        }
                     }
-                    
 
                     //WORKING LOGIC GATE TO VISUALLY SAY "Not Ready" FOR RELAY - THIS DOES NOT FIREWALL GATE THE CLIENT
                     //RELAY BLOCK LOGIC GATE
