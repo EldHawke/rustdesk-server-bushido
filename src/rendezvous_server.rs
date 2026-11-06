@@ -474,6 +474,21 @@ impl RendezvousServer {
 
                     if !rp.id.is_empty() {
 
+                        match self.pm.db.get_status(&rp.id).await {
+                            Ok(Some(crate::database::STATUS_APPROVED)) => {}
+                            Ok(Some(status)) => {
+                                log::warn!("Relay gate: Peer {} rejected, status: {}", rp.id, status);
+                                return Ok(());
+                            }
+                            Ok(None) => {
+                                log::info!("Relay gate: New peer {}, allowing registration", rp.id);
+                            }
+                            Err(err) => {
+                                log::error!("Relay gate: Database error for {}: {}", rp.id, err);
+                                return Ok(());
+                            }
+                        }
+
                         log::trace!("New peer registered: {:?} {:?}", &rp.id, &addr);
                         self.update_addr(rp.id, addr, socket).await?;
                         if self.inner.serial > rp.serial {
