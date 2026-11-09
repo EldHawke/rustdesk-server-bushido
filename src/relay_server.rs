@@ -542,23 +542,11 @@ async fn make_pair_(
 ) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
-        // log::info!(
-        //     "[CUSTOM] (6.2) relay_server.rs - make_pair_ -> first message received, addr={}, bytes={}",
-        //     addr,
-        //     bytes.len()
-        // );
+
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
-            // log::info!(
-            //     "[CUSTOM] (6.3) relay_server.rs - make_pair_ -> RendezvousMessage parsed, addr={}",
-            //     addr
-            // );
+            
             if let Some(rendezvous_message::Union::RequestRelay(rf)) = msg_in.union {
-                // log::info!(
-                //     "[CUSTOM] (6.4) relay_server.rs - make_pair_ -> RequestRelay received, addr={}, id='{}', uuid='{}'",
-                //     addr,
-                //     rf.id,
-                //     rf.uuid
-                // );
+            
                 if !key.is_empty() && rf.licence_key != key {
                     log::warn!("Relay authentication failed from {} - invalid key", addr);
                     return;
@@ -568,25 +556,81 @@ async fn make_pair_(
                     if let Some(peer) = peer.as_mut() {
                         log::info!("Relayrequest {} from {} got paired", rf.uuid, addr);
 
+                        // // [CUSTOM] Native RustDesk peer-status admission gate.
+                        // // First connection is the originator.
+                        // // If its ID is blank, use the second connection's ID.
+                        // let originator_id = if !peer.claimed_id.is_empty() {
+                        //     peer.claimed_id.as_str()
+                        // } else {
+                        //     rf.id.as_str()
+                        // };
+
+                        // if originator_id.is_empty() {
+                        //     log::warn!(
+                        //         "[RELAY GATE] Rejected {}: originator ID is empty",
+                        //         rf.uuid
+                        //     );
+                        //     return;
+                        // }
+
+                        // // Open the native RustDesk peer database.
+                        // let db_url = std::env::var("DB_URL")
+                        //     .unwrap_or_else(|_| "./db_v2.sqlite3".to_owned());
+
+                        // let db_options = match SqliteConnectOptions::from_str(&db_url) {
+                        //     Ok(options) => options,
+                        //     Err(err) => {
+                        //         log::error!("[RELAY GATE] Invalid database configuration: {}", err);
+                        //         return;
+                        //     }
+                        // };
+
+                        // let mut peer_db = match SqliteConnection::connect_with(&db_options).await {
+                        //     Ok(conn) => conn,
+                        //     Err(err) => {
+                        //         log::error!("[RELAY GATE] Database connection failed: {}", err);
+                        //         return;
+                        //     }
+                        // };
+
+                        // // Only status 1 is permitted.
+                        // let status = sqlx::query_scalar::<_, Option<i64>>(
+                        //     "SELECT status FROM peer WHERE id = ?"
+                        // )
+                        // .bind(originator_id)
+                        // .fetch_optional(&mut peer_db)
+                        // .await;
+
+                        // match status {
+                        //     Ok(Some(Some(1))) => {
+                        //         log::info!(
+                        //             "[RELAY GATE] APPROVED originator={} uuid={}",
+                        //             originator_id,
+                        //             rf.uuid
+                        //         );
+                        //     }
+                        //     Ok(other) => {
+                        //         log::warn!(
+                        //             "[RELAY GATE] REJECTED originator={} status={:?} uuid={}",
+                        //             originator_id,
+                        //             other,
+                        //             rf.uuid
+                        //         );
+                        //         return;
+                        //     }
+                        //     Err(err) => {
+                        //         log::error!(
+                        //             "[RELAY GATE] Database query failed for {}: {}",
+                        //             originator_id,
+                        //             err
+                        //         );
+                        //         return;
+                        //     }
+                        // }
+
                         // [CUSTOM] Native RustDesk peer-status admission gate.
+                        // Both relay participants must have approved peer records.
 
-                        // First connection is the originator.
-                        // If its ID is blank, use the second connection's ID.
-                        let originator_id = if !peer.claimed_id.is_empty() {
-                            peer.claimed_id.as_str()
-                        } else {
-                            rf.id.as_str()
-                        };
-
-                        if originator_id.is_empty() {
-                            log::warn!(
-                                "[RELAY GATE] Rejected {}: originator ID is empty",
-                                rf.uuid
-                            );
-                            return;
-                        }
-
-                        // Open the native RustDesk peer database.
                         let db_url = std::env::var("DB_URL")
                             .unwrap_or_else(|_| "./db_v2.sqlite3".to_owned());
 
@@ -606,59 +650,52 @@ async fn make_pair_(
                             }
                         };
 
-                        // Only status 1 is permitted.
-                        let status = sqlx::query_scalar::<_, Option<i64>>(
-                            "SELECT status FROM peer WHERE id = ?"
-                        )
-                        .bind(originator_id)
-                        .fetch_optional(&mut peer_db)
-                        .await;
+                        for (side, peer_id) in [
+                            ("first", peer.claimed_id.as_str()),
+                            ("second", rf.id.as_str()),
+                        ] {
+                            if peer_id.is_empty() {
+                                log::warn!("[RELAY GATE] Rejected: {} participant ID is empty", side);
+                                return;
+                            }
 
-                        match status {
-                            Ok(Some(Some(1))) => {
-                                log::info!(
-                                    "[RELAY GATE] APPROVED originator={} uuid={}",
-                                    originator_id,
-                                    rf.uuid
-                                );
-                            }
-                            Ok(other) => {
-                                log::warn!(
-                                    "[RELAY GATE] REJECTED originator={} status={:?} uuid={}",
-                                    originator_id,
-                                    other,
-                                    rf.uuid
-                                );
-                                return;
-                            }
-                            Err(err) => {
-                                log::error!(
-                                    "[RELAY GATE] Database query failed for {}: {}",
-                                    originator_id,
-                                    err
-                                );
-                                return;
+                            let status = sqlx::query_scalar::<_, Option<i64>>(
+                                "SELECT status FROM peer WHERE id = ?"
+                            )
+                            .bind(peer_id)
+                            .fetch_optional(&mut peer_db)
+                            .await;
+
+                            match status {
+                                Ok(Some(Some(1))) => {
+                                    log::info!(
+                                        "[RELAY GATE] APPROVED {} participant={} uuid={}",
+                                        side,
+                                        peer_id,
+                                        rf.uuid
+                                    );
+                                }
+                                Ok(other) => {
+                                    log::warn!(
+                                        "[RELAY GATE] REJECTED {} participant={} status={:?} uuid={}",
+                                        side,
+                                        peer_id,
+                                        other,
+                                        rf.uuid
+                                    );
+                                    return;
+                                }
+                                Err(err) => {
+                                    log::error!(
+                                        "[RELAY GATE] Database query failed for {} participant={}: {}",
+                                        side,
+                                        peer_id,
+                                        err
+                                    );
+                                    return;
+                                }
                             }
                         }
-
-
-                        //Original logging for relay connections
-                        /*if let Err(err) = crate::relay_sessions::create_session(
-							&session_db,
-							&rf.uuid,
-							&peer.claimed_id,
-							&rf.id,
-							&peer.source_addr.to_string(),
-							&addr.to_string(),
-						)
-						.await
-						{
-							log::error!(
-								"Failed to record relay session {}: {}",
-								rf.uuid,
-								err
-							);
-						}*/
 
                         let id = format!("{}:{}", addr.ip(), addr.port());
                         USAGE.write().await.insert(id.clone(), Default::default());
@@ -680,17 +717,6 @@ async fn make_pair_(
 						} else {
 							log::info!("Relay of {} closed", addr);
 						}
-
-                        //Original logging for relay connections
-						/*if let Err(err) =
-							crate::relay_sessions::close_session(&session_db, &rf.uuid).await
-						{
-							log::error!(
-								"Failed to close relay session {}: {}",
-								rf.uuid,
-								err
-							);
-						}*/
 
 						USAGE.write().await.remove(&id);
 
