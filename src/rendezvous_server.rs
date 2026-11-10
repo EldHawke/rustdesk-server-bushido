@@ -1094,11 +1094,19 @@ impl RendezvousServer {
                     peer_addr,
                     addr
                 );
+                // msg_out.set_punch_hole(PunchHole {
+                //     socket_addr,
+                //     nat_type: ph.nat_type,
+                //     relay_server,
+                //     force_relay: true,
+                //     ..Default::default()
+                // });
                 msg_out.set_punch_hole(PunchHole {
                     socket_addr,
                     nat_type: ph.nat_type,
                     relay_server,
                     force_relay: true,
+                    requester_id: requester_id.clone(),
                     ..Default::default()
                 });
             }
