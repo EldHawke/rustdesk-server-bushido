@@ -480,7 +480,13 @@ impl RendezvousServer {
                                 log::warn!("Relay gate: Peer {} rejected, status: {}", rp.id, status);
                                 return Ok(());
                             }
+                            // Ok(None) => {
+                            //     log::info!("Relay gate: New peer {}, allowing registration", rp.id);
+                            // }
                             Ok(None) => {
+                                if self.pm.remove_in_memory(&rp.id).await.is_some() {
+                                    log::warn!("Relay gate: Removed stale in-memory peer {}", rp.id);
+                                }
                                 log::info!("Relay gate: New peer {}, allowing registration", rp.id);
                             }
                             Err(err) => {
@@ -518,6 +524,28 @@ impl RendezvousServer {
                     } else if !self.check_ip_blocker(&ip, &id).await {
                         return send_rk_res(socket, addr, TOO_FREQUENT).await;
                     }
+
+                    match self.pm.db.get_peer(&id).await {
+                        Ok(Some(db_peer)) => {
+                            if let Some(memory_peer) = self.pm.get_in_memory(&id).await {
+                                let memory_guid = memory_peer.read().await.guid.clone();
+                                if memory_guid.as_slice() != db_peer.guid.as_slice() {
+                                    self.pm.remove_in_memory(&id).await;
+                                    log::warn!("Relay gate: Removed stale in-memory peer {} (GUID mismatch)", id);
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            if self.pm.remove_in_memory(&id).await.is_some() {
+                                log::warn!("Relay gate: Removed stale in-memory peer {} (DB record missing)", id);
+                            }
+                        }
+                        Err(err) => {
+                            log::error!("Relay gate: Database lookup failed for {}: {}", id, err);
+                            return Ok(());
+                        }
+                    }
+
                     let peer = self.pm.get_or(&id).await;
                     let (changed, ip_changed) = {
                         let peer = peer.read().await;

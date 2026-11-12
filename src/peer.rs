@@ -298,6 +298,11 @@ impl PeerMap {
         self.map.read().await.get(id).cloned()
     }
 
+    #[inline]
+    pub(crate) async fn remove_in_memory(&self, id: &str) -> Option<LockPeer> {
+        self.map.write().await.remove(id)
+    }
+
 	pub async fn api_list_peers(
 		&self,
 		status: Option<i64>,
