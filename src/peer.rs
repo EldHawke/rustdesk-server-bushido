@@ -150,8 +150,8 @@ impl PeerMap {
             log::info!("pk updated instead of insert");
         }
 
-        //if !is_new {
-        {
+        if !is_new {
+        //{
             let approved = match self.db.get_status(&id).await {
                 Ok(Some(crate::database::STATUS_APPROVED)) => {
                     log::info!("Peer {} approved", id);

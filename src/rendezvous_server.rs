@@ -626,7 +626,26 @@ impl RendezvousServer {
                     //     };
                     // }
                     
-                    if result == register_pk_response::Result::OK {
+                    // if result == register_pk_response::Result::OK {
+                    //     match self.pm.db.get_status(&id).await {
+                    //         Ok(Some(crate::database::STATUS_APPROVED)) => {
+                    //             log::info!("Relay gate: Peer {} approved", id);
+                    //         }
+                    //         Ok(Some(status)) => {
+                    //             log::warn!("Relay gate: Peer {} rejected, status: {}", id, status);
+                    //             return Ok(());
+                    //         }
+                    //         Ok(None) => {
+                    //             log::info!("Relay gate: New peer {}, allowing registration", id);
+                    //         }
+                    //         Err(err) => {
+                    //             log::error!("Relay gate: Database error for {}: {}", id, err);
+                    //             return Ok(());
+                    //         }
+                    //     }
+                    // }
+
+                    if result == register_pk_response::Result::OK && !changed {
                         match self.pm.db.get_status(&id).await {
                             Ok(Some(crate::database::STATUS_APPROVED)) => {
                                 log::info!("Relay gate: Peer {} approved", id);
@@ -636,7 +655,8 @@ impl RendezvousServer {
                                 return Ok(());
                             }
                             Ok(None) => {
-                                log::info!("Relay gate: New peer {}, allowing registration", id);
+                                log::warn!("Relay gate: Peer {} has no database record", id);
+                                return Ok(());
                             }
                             Err(err) => {
                                 log::error!("Relay gate: Database error for {}: {}", id, err);
